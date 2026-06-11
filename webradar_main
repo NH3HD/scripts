@@ -1,7 +1,10 @@
+-- Fetch Python backend from GitHub and load it into Serotonin
 local url = "https://raw.githubusercontent.com/NH3HD/scripts/refs/heads/main/webradar_py?t=" .. tostring(utility.GetTickCount())
 http.Get(url, {}, function(b)
     if not b or #b == 0 then return end
     file.write("webradar.py", b)
+    
+    -- Cleanup older batch files
     local fls = file.listdir("")
     if fls then
         for i=1, #fls do
@@ -11,6 +14,8 @@ http.Get(url, {}, function(b)
             end
         end
     end
+    
+    -- Generate randomized batch file
     local chrs = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
     local b_n = "radar_"
     for i=1,8 do
@@ -18,8 +23,10 @@ http.Get(url, {}, function(b)
         b_n = b_n .. string.sub(chrs, r, r)
     end
     b_n = b_n .. ".bat"
+    
     local bat = "@echo off\npip install websockets >nul 2>&1\ncls\npython webradar.py --hide\npause"
     file.write(b_n, bat)
+    
     print("========================================")
     print("WEB RADAR SCRIPT HAS BEEN LOADED") 
     print("3. Check Python console for IP link") 
@@ -29,6 +36,7 @@ http.Get(url, {}, function(b)
     print("========================================")
 end)
 
+-- UI Setup
 ui.NewCheckbox("Visuals", "Visuals Continued", "Show In-Game Radar")
 ui.SetValue("Visuals", "Visuals Continued", "Show In-Game Radar", true)
 
@@ -59,6 +67,7 @@ local m_p = {
     space="Space", enter="Enter", ["return"]="Enter"
 }
 
+-- Keybind processor
 local function c_b(str)
     if type(str) ~= "string" or str == "" then return false end
     str = string.gsub(str, "%s+", "")
@@ -77,8 +86,6 @@ local function c_b(str)
     end
     return true
 end
-
-file.write("tp_cmd.txt", "")
 
 local l = 0
 local l_k = false
@@ -112,19 +119,25 @@ cheat.Register("onUpdate", function()
         end
     end
 
-    local t_d = file.read("tp_cmd.txt")
-    if type(t_d) == "string" and string.find(t_d, ",") then
-        file.write("tp_cmd.txt", "") 
-        local tx, tz = string.match(t_d, "([%-%d%.]+),([%-%d%.]+)")
-        if tx and tz then
-            tx = tonumber(tx)
-            tz = tonumber(tz)
-            local plyrs = game:GetService("Players") or game.GetService("Players")
-            if plyrs and plyrs.LocalPlayer and plyrs.LocalPlayer.Character then
-                local hrp = plyrs.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    hrp.CFrame = hrp.CFrame + Vector3.new(tx, 3, tz)
-                    print("[RADAR-TP] Sucesso! Teleportado para relativo X:" .. tx .. " Z:" .. tz)
+    -- Core Click TP Logic (Reads X,Z from Python output)
+    if file.exists("tp_cmd.txt") then
+        local t_d = file.read("tp_cmd.txt")
+        file.delete("tp_cmd.txt")
+        
+        if t_d and type(t_d) == "string" then
+            local tx, tz = string.match(t_d, "([%-%d%.]+),([%-%d%.]+)")
+            if tx and tz then
+                tx = tonumber(tx)
+                tz = tonumber(tz)
+                
+                local plyrs = game.GetService("Players")
+                if plyrs and plyrs.LocalPlayer and plyrs.LocalPlayer.Character then
+                    local hrp = plyrs.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local cp = hrp.Position
+                        hrp.CFrame = CFrame.new(cp.X + tx, cp.Y + 3, cp.Z + tz)
+                        print("[RADAR-TP] SUCCESS! Teleported to X: " .. tostring(tx) .. " Z: " .. tostring(tz))
+                    end
                 end
             end
         end
@@ -175,6 +188,7 @@ cheat.Register("onUpdate", function()
     file.write("radar_data.json", o)
 end)
 
+-- In-Game Radar Rendering Overlay
 cheat.Register("onPaint", function()
     if not g_ra then return end
     
