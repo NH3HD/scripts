@@ -112,24 +112,34 @@ cheat.Register("onUpdate", function()
         end
     end
 
+    -- Core TP Logic with IPC File read
     local t_d = file.read("tp_cmd.txt")
-    if type(t_d) == "string" and string.find(t_d, ",") then
+    if t_d and type(t_d) == "string" and string.find(t_d, ",") then
         file.write("tp_cmd.txt", "") 
         local tx, tz = string.match(t_d, "([%-%d%.]+),([%-%d%.]+)")
         if tx and tz then
             tx = tonumber(tx)
             tz = tonumber(tz)
+            print("[RADAR-TP] Coords read from txt: X=" .. tx .. " Z=" .. tz)
             
-            local plyrs = game.GetService("Players")
-            if plyrs and plyrs.LocalPlayer and plyrs.LocalPlayer.Character then
-                local char = plyrs.LocalPlayer.Character
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    local cp = hrp.Position
-                    hrp.Position = Vector3.new(cp.X + tx, cp.Y + 3, cp.Z + tz)
-                    print("[RADAR-TP] Teleported to relative coords X:" .. tx .. " Z:" .. tz)
+            local ok, err = pcall(function()
+                local plyrs = game:GetService("Players")
+                if plyrs and plyrs.LocalPlayer and plyrs.LocalPlayer.Character then
+                    local hrp = plyrs.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local dest = Vector3.new(hrp.Position.X + tx, hrp.Position.Y + 3, hrp.Position.Z + tz)
+                        if CFrame and CFrame.new then
+                            hrp.CFrame = CFrame.new(dest)
+                        else
+                            hrp.Position = dest
+                        end
+                        print("[RADAR-TP] SUCCESS! Player moved.")
+                    else
+                        print("[RADAR-TP] Fail: HumanoidRootPart not found.")
+                    end
                 end
-            end
+            end)
+            if not ok then print("[RADAR-TP] Lua Error: " .. tostring(err)) end
         end
     end
 
@@ -203,20 +213,21 @@ cheat.Register("onPaint", function()
     
     if sty == 0 then
         draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09))
-        draw.Rect(rx - 3, ry - 3, rsz + 6, rsz + 6, Color3.new(0.03, 0.1, 0.08))
-        draw.Rect(rx - 2, ry - 2, rsz + 4, rsz + 4, Color3.new(0.06, 0.2, 0.17))
-        draw.Rect(rx - 1, ry - 1, rsz + 2, rsz + 2, Color3.new(0.12, 0.4, 0.35))
-        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8))
-        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2))
-        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2))
+        draw.Rect(rx - 3, ry - 3, rsz + 6, rsz + 6, Color3.new(0.03, 0.1, 0.08), 1, 4)
+        draw.Rect(rx - 2, ry - 2, rsz + 4, rsz + 4, Color3.new(0.06, 0.2, 0.17), 1, 4)
+        draw.Rect(rx - 1, ry - 1, rsz + 2, rsz + 2, Color3.new(0.12, 0.4, 0.35), 1, 4)
+        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8), 1, 4)
+        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
+        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
     elseif sty == 1 then
         draw.CircleFilled(cx, cy, hsz, Color3.new(0.08, 0.08, 0.09), 64)
-        draw.Circle(cx, cy, hsz + 3, Color3.new(0.03, 0.1, 0.08), 64)
-        draw.Circle(cx, cy, hsz + 2, Color3.new(0.06, 0.2, 0.17), 64)
-        draw.Circle(cx, cy, hsz + 1, Color3.new(0.12, 0.4, 0.35), 64)
-        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8), 64)
-        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2))
-        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2))
+        -- Format: x, y, radius, color, segments, thickness
+        draw.Circle(cx, cy, hsz + 3, Color3.new(0.03, 0.1, 0.08), 64, 1)
+        draw.Circle(cx, cy, hsz + 2, Color3.new(0.06, 0.2, 0.17), 64, 1)
+        draw.Circle(cx, cy, hsz + 1, Color3.new(0.12, 0.4, 0.35), 64, 1)
+        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8), 64, 1)
+        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
+        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
     end
     
     draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12)
