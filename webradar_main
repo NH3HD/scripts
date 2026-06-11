@@ -125,19 +125,9 @@ cheat.Register("onUpdate", function()
                 local char = plyrs.LocalPlayer.Character
                 local hrp = char:FindFirstChild("HumanoidRootPart")
                 if hrp then
-                    local dest = hrp.Position + Vector3.new(tx, 3, tz)
-                    local ok, err = pcall(function()
-                        if char.MoveTo then
-                            char:MoveTo(dest)
-                        else
-                            hrp.Position = dest
-                        end
-                    end)
-                    if ok then
-                        print("[RADAR-TP] Teleported to X:" .. tx .. " Z:" .. tz)
-                    else
-                        print("[RADAR-TP] Error: " .. tostring(err))
-                    end
+                    local cp = hrp.Position
+                    hrp.Position = Vector3.new(cp.X + tx, cp.Y + 3, cp.Z + tz)
+                    print("[RADAR-TP] Teleported to relative coords X:" .. tx .. " Z:" .. tz)
                 end
             end
         end
@@ -198,7 +188,7 @@ cheat.Register("onPaint", function()
     if not pos then return end
     
     local cam = game.GetService("Workspace"):FindFirstChildOfClass("Camera")
-    local lv = (cam and cam.CFrame) and cam.CFrame.LookVector or Vector3.new(0,0,-1)
+    local lv = cam and cam.LookVector or Vector3.new(0,0,-1)
     local yaw = math.atan2(-lv.X, -lv.Z)
     
     local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 0
