@@ -41,6 +41,12 @@ ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Size", 200)
 ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Zoom", 10, 200, 50)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom", 50)
 
+ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Pos X", 0, 3000, 20)
+ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Pos X", 20)
+
+ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Pos Y", 0, 2000, 300)
+ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Pos Y", 300)
+
 ui.NewInputText("Visuals", "Visuals Continued", "Radar Keybind")
 ui.SetValue("Visuals", "Visuals Continued", "Radar Keybind", "")
 
@@ -104,6 +110,27 @@ cheat.Register("onUpdate", function()
         end
     end
 
+    if file.exists("tp_cmd.txt") then
+        local t_d = file.read("tp_cmd.txt")
+        file.delete("tp_cmd.txt")
+        local tx, tz = string.match(t_d, '"x":([%-%d%.]+).*"z":([%-%d%.]+)')
+        if tx and tz then
+            tx = tonumber(tx)
+            tz = tonumber(tz)
+            local plyrs = game.GetService("Players")
+            if plyrs then
+                local lp_i = plyrs.LocalPlayer
+                if lp_i and lp_i.Character then
+                    local hrp = lp_i.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local cp = hrp.Position
+                        hrp.CFrame = CFrame.new(cp.X + tx, cp.Y + 2, cp.Z + tz)
+                    end
+                end
+            end
+        end
+    end
+
     local n = utility.GetTickCount()
     if n - l < 25 then return end
     l = n
@@ -162,31 +189,32 @@ cheat.Register("onPaint", function()
     local lv = (cam and cam.CFrame) and cam.CFrame.LookVector or Vector3.new(0,0,-1)
     local yaw = math.atan2(-lv.X, -lv.Z)
     
-    local w_s, h_s = draw.GetScreenSize()
     local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 0
     local rsz = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Size") or 200
     local sc = (ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom") or 50) / 50.0
     
-    local rx, ry = 20, (h_s / 2) - (rsz / 2)
+    local rx = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Pos X") or 20
+    local ry = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Pos Y") or 300
+    
     local hsz = rsz / 2
     local cx, cy = rx + hsz, ry + hsz
     
     if sty == 0 then
-        draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09), 4)
-        draw.Rect(rx - 3, ry - 3, rsz + 6, rsz + 6, Color3.new(0.03, 0.1, 0.08), 4, 1)
-        draw.Rect(rx - 2, ry - 2, rsz + 4, rsz + 4, Color3.new(0.06, 0.2, 0.17), 4, 1)
-        draw.Rect(rx - 1, ry - 1, rsz + 2, rsz + 2, Color3.new(0.12, 0.4, 0.35), 4, 1)
-        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8), 4, 1)
-        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
-        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
+        draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09))
+        draw.Rect(rx - 3, ry - 3, rsz + 6, rsz + 6, Color3.new(0.03, 0.1, 0.08))
+        draw.Rect(rx - 2, ry - 2, rsz + 4, rsz + 4, Color3.new(0.06, 0.2, 0.17))
+        draw.Rect(rx - 1, ry - 1, rsz + 2, rsz + 2, Color3.new(0.12, 0.4, 0.35))
+        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8))
+        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2))
+        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2))
     elseif sty == 1 then
         draw.CircleFilled(cx, cy, hsz, Color3.new(0.08, 0.08, 0.09), 64)
-        draw.Circle(cx, cy, hsz + 3, Color3.new(0.03, 0.1, 0.08), 1, 64)
-        draw.Circle(cx, cy, hsz + 2, Color3.new(0.06, 0.2, 0.17), 1, 64)
-        draw.Circle(cx, cy, hsz + 1, Color3.new(0.12, 0.4, 0.35), 1, 64)
-        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8), 1, 64)
-        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
-        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
+        draw.Circle(cx, cy, hsz + 3, Color3.new(0.03, 0.1, 0.08), 64)
+        draw.Circle(cx, cy, hsz + 2, Color3.new(0.06, 0.2, 0.17), 64)
+        draw.Circle(cx, cy, hsz + 1, Color3.new(0.12, 0.4, 0.35), 64)
+        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8), 64)
+        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2))
+        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2))
     end
     
     draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12)
