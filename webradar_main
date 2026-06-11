@@ -189,6 +189,7 @@ cheat.Register("onPaint", function()
     local lv = (cam and cam.CFrame) and cam.CFrame.LookVector or Vector3.new(0,0,-1)
     local yaw = math.atan2(-lv.X, -lv.Z)
     
+    local w_s, h_s = draw.GetScreenSize()
     local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 0
     local rsz = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Size") or 200
     local sc = (ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom") or 50) / 50.0
