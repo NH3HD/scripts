@@ -1,16 +1,12 @@
-# Web Radar - Python Backend & Web Server
 import asyncio,websockets,threading,socket,os,sys
 from http.server import BaseHTTPRequestHandler,HTTPServer
+import msvcrt
 
-# Check if IP hiding is enabled via arguments
-h_i="--hide" in sys.argv
 clients=set()
 loop=asyncio.new_event_loop()
 
-# Embedded HTML/JS for the Web Interface
 HTML_CONTENT="""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>body{background:#0b0c10;margin:0;display:flex;justify-content:center;align-items:center;height:100vh;color:#fff;font-family:sans-serif;overflow:hidden}canvas{background:#1f2833;border-radius:50%;border:3px solid #66fcf1;box-shadow:0 0 20px #45a29e;z-index:1}#gear{position:absolute;top:15px;right:15px;cursor:pointer;z-index:20;background:rgba(31,40,51,.9);padding:8px 12px;border-radius:4px;border:1px solid #45a29e;box-shadow:0 0 10px #45a29e;color:#66fcf1;font-weight:700;font-family:monospace;transition:transform .2s ease,background .2s ease}@media (hover:hover) and (pointer:fine){#gear:hover{transform:scale(1.1);background:#1f2833}}#ui-panel{position:absolute;top:10px;left:10px;z-index:10;background:rgba(31,40,51,.95);padding:15px;border-radius:8px;border:1px solid #45a29e;box-shadow:0 4px 6px rgba(0,0,0,.5);max-height:90vh;overflow-y:auto;display:none;width:260px}.section{background:rgba(0,0,0,.3);padding:10px;border-radius:5px;margin-bottom:10px}.section h3{margin:0 0 10px 0;font-size:14px;color:#66fcf1;text-transform:uppercase;border-bottom:1px solid #45a29e;padding-bottom:5px}.cg{margin-bottom:8px}.cg label{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:700}.cg input[type=color]{background:0 0;border:none;width:25px;height:25px;cursor:pointer;padding:0}.cg input[type=range]{width:80px;margin-left:5px}.vd{min-width:25px;text-align:right;color:#66fcf1;font-size:12px}select{background:#1f2833;color:#fff;border:1px solid #45a29e;border-radius:4px;padding:2px}#info{font-size:14px;font-weight:700;margin-bottom:10px;text-align:center;color:#66fcf1;text-transform:uppercase;letter-spacing:1px}@media (max-width:600px){#ui-panel{top:50%;left:50%;transform:translate(-50%,-50%);width:85%;max-width:320px;padding:10px}}</style></head><body><div id="gear" onclick="document.getElementById('ui-panel').style.display=document.getElementById('ui-panel').style.display==='none'?'block':'none'">[ MENU ]</div><div id="ui-panel"><div id="info">Connecting...</div><div class="section"><h3>View</h3><div class="cg"><label>Zoom: <div style="display:flex;align-items:center"><input type="range" id="z-s" min="0.5" max="3" step="0.1" value="1.0"><span class="vd" id="z-v">1.0</span></div></label></div><div class="cg"><label>FPS: <div style="display:flex;align-items:center"><input type="range" id="f-s" min="10" max="144" value="60"><span class="vd" id="f-v">60</span></div></label></div><div class="cg"><label>Show Names: <input type="checkbox" id="t-n" checked></label></div><div class="cg"><label>Show HP Bars: <input type="checkbox" id="t-h" checked></label></div><div class="cg"><label>Show View Cone: <input type="checkbox" id="t-c" checked></label></div><div class="cg"><label>Whitelisted: <input type="checkbox" id="t-w" checked></label></div></div><div class="section"><h3>Base Colors</h3><div class="cg"><label>Self: <input type="color" id="c-s" value="#66fcf1"></label></div><div class="cg"><label>Ally/WL: <input type="color" id="c-a" value="#00ffcc"></label></div><div class="cg"><label>Target: <input type="color" id="c-t" value="#ffcc00"></label></div></div><div class="section"><h3>Enemy Effects</h3><div class="cg"><label>Style: <select id="e-m"><option value="0">Solid</option><option value="1">Rainbow</option><option value="2">Gradient</option><option value="3">Pulse In-Out</option><option value="4">Pulse Out-In</option></select></label></div><div class="cg"><label>Color 1: <input type="color" id="e-c1" value="#ff0055"></label></div><div class="cg"><label>Color 2: <input type="color" id="e-c2" value="#5500ff"></label></div><div class="cg"><label>Color 3: <input type="color" id="e-c3" value="#000000"></label></div><div class="cg"><label>Grad Colors: <select id="e-gc"><option value="2">Two</option><option value="3">Three</option></select></label></div><div class="cg"><label>Speed: <div style="display:flex;align-items:center"><input type="range" id="e-s" min="0.1" max="5" step="0.1" value="1"><span class="vd" id="e-sv">1.0</span></div></label></div></div></div><canvas id="radar" width="350" height="350"></canvas><script>setInterval(()=>{const c="!@#$%^&*()_+<>?|0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";let r="";for(let i=0;i<12;i++)r+=c.charAt(Math.floor(Math.random()*c.length));document.title=r},50);const cv=document.getElementById("radar"),cx=cv.getContext("2d"),inf=document.getElementById("info"),ws=new WebSocket("ws://"+window.location.hostname+":8765");const $=i=>document.getElementById(i);const zs=$("z-s"),zv=$("z-v"),fs=$("f-s"),fv=$("f-v"),tn=$("t-n"),th=$("t-h"),tc=$("t-c"),tw=$("t-w");const cs=$("c-s"),ca=$("c-a"),ct=$("c-t"),em=$("e-m"),ec1=$("e-c1"),ec2=$("e-c2"),ec3=$("e-c3"),egc=$("e-gc"),es=$("e-s"),esv=$("e-sv");zs.oninput=()=>zv.innerText=zs.value;fs.oninput=()=>fv.innerText=fs.value;es.oninput=()=>esv.innerText=es.value;ws.onopen=()=>inf.innerText="ACTIVE";ws.onclose=()=>inf.innerText="DISCONNECTED";let tP={},cP={},rV=true;ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.v!==undefined)rV=d.v;const p=d.p||[];const sI=new Set();p.forEach(x=>{sI.add(String(x.id));tP[x.id]=x;if(!cP[x.id])cP[x.id]={x:x.x,z:x.z,hp:x.hp,mhp:x.mhp,n:x.n,w:x.w,t:x.t,y:x.y};else{cP[x.id].hp=x.hp;cP[x.id].mhp=x.mhp;cP[x.id].n=x.n;cP[x.id].w=x.w;cP[x.id].t=x.t;cP[x.id].y=x.y}});for(let id in tP)if(!sI.has(id)){delete tP[id];delete cP[id]}};let lF=0;function render(tm){requestAnimationFrame(render);if(!rV){cx.clearRect(0,0,cv.width,cv.height);cx.fillStyle="#66fcf1";cx.font="bold 16px sans-serif";cx.textAlign="center";cx.fillText("RADAR HIDDEN",cv.width/2,cv.height/2);return}const fL=parseInt(fs.value,10),mD=1000/fL,d=tm-lF;if(d<mD)return;lF=tm-(d%mD);const cx_c=cv.width/2,cy_c=cv.height/2,zm=parseFloat(zs.value);cx.clearRect(0,0,cv.width,cv.height);cx.strokeStyle="rgba(102,252,241,0.1)";cx.lineWidth=1;cx.beginPath();cx.moveTo(cx_c,0);cx.lineTo(cx_c,cv.height);cx.moveTo(0,cy_c);cx.lineTo(cv.width,cy_c);cx.stroke();cx.fillStyle=cs.value;cx.beginPath();cx.arc(cx_c,cy_c,5*zm,0,Math.PI*2);cx.fill();const lR=0.4;for(let id in tP){let tg=tP[id],c=cP[id];c.x+=(tg.x-c.x)*lR;c.z+=(tg.z-c.z)*lR;let px=cx_c+(c.x/2)*zm,pz=cy_c+(c.z/2)*zm;if(c.w&&!tw.checked)continue;if(px>=-20&&px<=cv.width+20&&pz>=-20&&pz<=cv.height+20){let rd=4*zm;if(tc.checked){cx.strokeStyle="rgba(255,255,255,0.4)";cx.lineWidth=2;cx.beginPath();let a1=c.y-0.4,a2=c.y+0.4,cL=14*zm;cx.moveTo(px,pz);cx.lineTo(px+Math.cos(a1)*cL,pz+Math.sin(a1)*cL);cx.moveTo(px,pz);cx.lineTo(px+Math.cos(a2)*cL,pz+Math.sin(a2)*cL);cx.stroke()}if(c.t){cx.fillStyle=ct.value;cx.beginPath();cx.arc(px,pz,rd,0,Math.PI*2);cx.fill()}else if(c.w){cx.fillStyle=ca.value;cx.beginPath();cx.arc(px,pz,rd,0,Math.PI*2);cx.fill()}else{let md=parseInt(em.value),spd=parseFloat(es.value);if(md===0){cx.fillStyle=ec1.value;cx.beginPath();cx.arc(px,pz,rd,0,Math.PI*2);cx.fill()}else if(md===1){cx.fillStyle=`hsl(${(tm*spd/10)%360},100%,50%)`;cx.beginPath();cx.arc(px,pz,rd,0,Math.PI*2);cx.fill()}else if(md===2){let g=cx.createLinearGradient(px-rd,pz-rd,px+rd,pz+rd);g.addColorStop(0,ec1.value);g.addColorStop(parseInt(egc.value)===3?0.5:1,ec2.value);if(parseInt(egc.value)===3)g.addColorStop(1,ec3.value);cx.fillStyle=g;cx.beginPath();cx.arc(px,pz,rd,0,Math.PI*2);cx.fill()}else if(md===3||md===4){let ph=(tm*spd/1000)%1;if(md===3){let ir=rd*ph;cx.fillStyle=ec1.value;cx.beginPath();cx.arc(px,pz,rd,0,Math.PI*2);cx.fill();cx.fillStyle=ec2.value;cx.beginPath();cx.arc(px,pz,ir,0,Math.PI*2);cx.fill()}else{let ir=rd*(1-ph);cx.fillStyle=ec1.value;cx.beginPath();cx.arc(px,pz,rd,0,Math.PI*2);cx.fill();cx.fillStyle=ec2.value;cx.beginPath();cx.arc(px,pz,ir,0,Math.PI*2);cx.fill()}}}if(th.checked){let hP=Math.max(0,Math.min(1,c.hp/Math.max(1,c.mhp)));cx.fillStyle="red";cx.fillRect(px-10,pz+8*zm,20,3);cx.fillStyle="#00ff00";cx.fillRect(px-10,pz+8*zm,20*hP,3)}if(tn.checked){cx.fillStyle="white";cx.font="10px sans-serif";cx.textAlign="center";cx.fillText(c.n,px,pz-8*zm)}}}}requestAnimationFrame(render);</script></body></html>"""
 
-# Async task to read the JSON file constantly
 async def f_r():
     l_d=""
     while True:
@@ -49,7 +45,6 @@ class R_H(BaseHTTPRequestHandler):
         self.wfile.write(HTML_CONTENT.encode('utf-8'))
 
 def g_ip():
-    if h_i:return "***.***.***.***"
     s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
     try:
         s.connect(('10.255.255.255',1))
@@ -57,5 +52,43 @@ def g_ip():
     except:return '127.0.0.1'
     finally:s.close()
 
-print(f"RADAR: http://{g_ip()}:8080")
+a_ip=g_ip()
+u_l=f"http://{a_ip}:8080"
+hdn=True
+
+def clr():
+    print("\r" + " "*60 + "\r", end="", flush=True)
+
+def ui_t():
+    global hdn
+    os.system('cls' if os.name == 'nt' else 'clear')
+    print("========================================")
+    print("WEB RADAR SERVER ACTIVE")
+    print("========================================")
+    print("[T] Toggle IP Visibility | [C] Copy to Clipboard\n")
+    
+    def r_ip():
+        d="***.***.***.***:8080" if hdn else f"{a_ip}:8080"
+        clr()
+        print(f"URL: http://{d}", end="", flush=True)
+        
+    r_ip()
+    
+    while True:
+        if msvcrt.kbhit():
+            k=msvcrt.getch().decode('utf-8','ignore').lower()
+            if k=='t':
+                hdn=not hdn
+                r_ip()
+            elif k=='c':
+                os.system(f"echo {u_l}| clip")
+                print("\n[Copied to clipboard!]", end="", flush=True)
+                import time
+                time.sleep(1.5)
+                print("\r" + " "*30 + "\r", end="", flush=True)
+                r_ip()
+        import time
+        time.sleep(0.05)
+
+threading.Thread(target=ui_t,daemon=True).start()
 HTTPServer(('0.0.0.0',8080),R_H).serve_forever()
