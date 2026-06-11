@@ -172,22 +172,24 @@ cheat.Register("onPaint", function()
     local cx, cy = rx + hsz, ry + hsz
     
     if sty == 0 then
-        draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09))
-        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8))
-        draw.Rect(rx - 1, ry - 1, rsz + 2, rsz + 2, Color3.new(0.15, 0.45, 0.4))
-        draw.Rect(rx - 2, ry - 2, rsz + 4, rsz + 4, Color3.new(0.07, 0.22, 0.2))
-        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2))
-        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2))
+        draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09), 4)
+        draw.Rect(rx - 3, ry - 3, rsz + 6, rsz + 6, Color3.new(0.03, 0.1, 0.08), 4, 1)
+        draw.Rect(rx - 2, ry - 2, rsz + 4, rsz + 4, Color3.new(0.06, 0.2, 0.17), 4, 1)
+        draw.Rect(rx - 1, ry - 1, rsz + 2, rsz + 2, Color3.new(0.12, 0.4, 0.35), 4, 1)
+        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8), 4, 1)
+        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
+        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
     elseif sty == 1 then
-        draw.CircleFilled(cx, cy, hsz, Color3.new(0.08, 0.08, 0.09))
-        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8))
-        draw.Circle(cx, cy, hsz + 1, Color3.new(0.15, 0.45, 0.4))
-        draw.Circle(cx, cy, hsz + 2, Color3.new(0.07, 0.22, 0.2))
-        draw.Line(cx, cy - hsz, cx, cy + hsz, Color3.new(0.2, 0.2, 0.2))
-        draw.Line(cx - hsz, cy, cx + hsz, cy, Color3.new(0.2, 0.2, 0.2))
+        draw.CircleFilled(cx, cy, hsz, Color3.new(0.08, 0.08, 0.09), 64)
+        draw.Circle(cx, cy, hsz + 3, Color3.new(0.03, 0.1, 0.08), 1, 64)
+        draw.Circle(cx, cy, hsz + 2, Color3.new(0.06, 0.2, 0.17), 1, 64)
+        draw.Circle(cx, cy, hsz + 1, Color3.new(0.12, 0.4, 0.35), 1, 64)
+        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8), 1, 64)
+        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
+        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
     end
     
-    draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94))
+    draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12)
     
     local plyrs = entity.GetPlayers()
     for i = 1, #plyrs do
@@ -224,7 +226,7 @@ cheat.Register("onPaint", function()
                     elseif not p.IsEnemy then
                         col = Color3.new(1, 1, 0.2)
                     end
-                    draw.CircleFilled(px, py, 3, col)
+                    draw.CircleFilled(px, py, 3, col, 12)
                 end
             end
         end
