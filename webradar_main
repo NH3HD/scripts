@@ -1,32 +1,82 @@
 http.Get("https://raw.githubusercontent.com/NH3HD/scripts/refs/heads/main/webradar_py", {}, function(b)
     file.write("webradar.py", b)
-    file.write("start_radar.bat", "@echo off\ntitle Web Radar\npip install websockets >nul 2>&1\ncls\npython webradar.py\npause")
+    local v_c = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    local b_n = "radar_"
+    for i=1,8 do
+        local r = utility.RandomInt(1, #v_c)
+        b_n = b_n .. string.sub(v_c, r, r)
+    end
+    b_n = b_n .. ".bat"
+    local bat = "@echo off\ntitle Web Radar\nset /p hide=\"Esconder o IP? (y/n): \"\npip install websockets >nul 2>&1\ncls\necho ========================================\necho Abra este link no navegador do celular ou PC:\nif /I \"%hide%\"==\"y\" (\npython webradar.py --hide\n) else (\npython webradar.py\n)\npause"
+    file.write(b_n, bat)
     print("========================================")
     print("WEB RADAR SCRIPT HAS BEEN LOADED") 
     print("3. Check Python console for IP link") 
-    print("2. Double-click 'start_radar.bat'")
+    print("2. Double-click '" .. b_n .. "'")
     print("1. Open C:\\Serotonin\\files")
     print("WEB RADAR SCRIPT HAS BEEN LOADED")
     print("========================================")
 end)
 
-ui.NewCheckbox("Visuals", "Visuals Continued", "Show Web Radar")
-ui.SetValue("Visuals", "Visuals Continued", "Show Web Radar", true)
-ui.NewHotkey("Visuals", "Visuals Continued", "Web Radar Keybind")
+ui.NewCheckbox("Visuals", "Visuals Continued", "Show In-Game Radar")
+ui.SetValue("Visuals", "Visuals Continued", "Show In-Game Radar", true)
+ui.NewInputText("Visuals", "Visuals Continued", "Radar Keybind")
+ui.SetValue("Visuals", "Visuals Continued", "Radar Keybind", "")
+ui.NewDropdown("Visuals", "Visuals Continued", "Keybind Mode", {"Hold", "Toggle", "Always On"})
+ui.SetValue("Visuals", "Visuals Continued", "Keybind Mode", 3)
+
+local m_p = {
+    esc="Escape", escape="Escape",
+    lctrl="Ctrl", rctrl="Ctrl", ctrl="Ctrl", control="Ctrl",
+    lshift="Shift", rshift="Shift", shift="Shift",
+    alt="Alt", lalt="Alt", ralt="Alt", altgr="Alt",
+    space="Space", enter="Enter", return="Enter"
+}
+
+local function c_b(str)
+    if type(str) ~= "string" or str == "" then return false end
+    str = string.gsub(str, " ", "")
+    if str == "" then return false end
+    str = string.lower(str)
+    local p = {}
+    for pt in string.gmatch(str, "([^%+]+)") do
+        p[#p + 1] = pt
+    end
+    if #p == 0 then return false end
+    for i = 1, #p do
+        local k = p[i]
+        k = m_p[k] or k
+        local ok, r = pcall(keyboard.IsPressed, k)
+        if not ok or not r then return false end
+    end
+    return true
+end
 
 local l = 0
 local l_k = false
-local v_r = true
+local g_ra = true
 
 cheat.Register("onUpdate", function()
-    v_r = ui.GetValue("Visuals", "Visuals Continued", "Show Web Radar")
-    local k_a = ui.GetValue("Visuals", "Visuals Continued", "Web Radar Keybind")
+    local c_v = ui.GetValue("Visuals", "Visuals Continued", "Show In-Game Radar")
+    local md = ui.GetValue("Visuals", "Visuals Continued", "Keybind Mode")
+    local bnd = ui.GetValue("Visuals", "Visuals Continued", "Radar Keybind")
+    local i_p = c_b(bnd)
     
-    if k_a and not l_k then
-        v_r = not v_r
-        ui.SetValue("Visuals", "Visuals Continued", "Show Web Radar", v_r)
+    if md == 2 then
+        if i_p and not l_k then
+            c_v = not c_v
+            ui.SetValue("Visuals", "Visuals Continued", "Show In-Game Radar", c_v)
+        end
     end
-    l_k = k_a
+    l_k = i_p
+
+    if md == 3 then
+        g_ra = c_v
+    elseif md == 1 then
+        g_ra = c_v and i_p
+    elseif md == 2 then
+        g_ra = c_v
+    end
 
     local n = utility.GetTickCount()
     if n - l < 25 then return end
@@ -41,7 +91,7 @@ cheat.Register("onUpdate", function()
     local tg = entity.GetTarget()
     local ti = (tg and tg.IsAlive) and tg.UserId or -1
 
-    local o = string.format('{"v":%s,"p":[', v_r and "true" or "false")
+    local o = '{"v":true,"p":['
     local e = entity.GetPlayers()
     local c = 0
 
@@ -71,4 +121,52 @@ cheat.Register("onUpdate", function()
     o = o .. "]}"
     
     file.write("radar_data.json", o)
+end)
+
+cheat.Register("onPaint", function()
+    if not g_ra then return end
+    local lp = entity.GetLocalPlayer()
+    if not lp or not lp.IsAlive then return end
+    local pos = lp:GetBonePosition("HumanoidRootPart")
+    if not pos then return end
+    
+    local cam = game.GetService("Workspace"):FindFirstChildOfClass("Camera")
+    local lv = cam and cam.LookVector or Vector3.new(0,0,-1)
+    local yaw = math.atan2(-lv.X, -lv.Z)
+    
+    local rx, ry = 20, 250
+    local rsz = 150
+    local hsz = rsz / 2
+    local cx, cy = rx + hsz, ry + hsz
+    
+    draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09), 4, 0.8)
+    draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8), 1, 4, 1)
+    draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
+    draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
+    draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12, 1)
+    
+    local sc = 1.0
+    local plyrs = entity.GetPlayers()
+    for i = 1, #plyrs do
+        local p = plyrs[i]
+        if p.IsAlive and p ~= lp then
+            local b = p:GetBonePosition("HumanoidRootPart")
+            if b and b.Magnitude > 0 then
+                local dx, dz = b.X - pos.X, b.Z - pos.Z
+                local sn, cs = math.sin(yaw), math.cos(yaw)
+                local px = cx + ((dx * cs - dz * sn) * sc)
+                local py = cy + ((dx * sn + dz * cs) * sc)
+                
+                if px >= rx and px <= rx + rsz and py >= ry and py <= ry + rsz then
+                    local col = Color3.new(1, 0.2, 0.2)
+                    if p.IsWhitelisted then
+                        col = Color3.new(0.2, 1, 0.8)
+                    elseif not p.IsEnemy then
+                        col = Color3.new(1, 1, 0.2)
+                    end
+                    draw.CircleFilled(px, py, 3, col, 12, 1)
+                end
+            end
+        end
+    end
 end)
