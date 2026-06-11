@@ -113,7 +113,8 @@ cheat.Register("onUpdate", function()
     if file.exists("tp_cmd.txt") then
         local t_d = file.read("tp_cmd.txt")
         file.delete("tp_cmd.txt")
-        local tx, tz = string.match(t_d, '"x":([%-%d%.]+).*"z":([%-%d%.]+)')
+        local tx = string.match(t_d, '"x" *: *([%-%d%.]+)')
+        local tz = string.match(t_d, '"z" *: *([%-%d%.]+)')
         if tx and tz then
             tx = tonumber(tx)
             tz = tonumber(tz)
@@ -124,7 +125,7 @@ cheat.Register("onUpdate", function()
                     local hrp = lp_i.Character:FindFirstChild("HumanoidRootPart")
                     if hrp then
                         local cp = hrp.Position
-                        hrp.CFrame = CFrame.new(cp.X + tx, cp.Y + 2, cp.Z + tz)
+                        hrp.CFrame = CFrame.new(cp.X + tx, cp.Y + 3, cp.Z + tz)
                     end
                 end
             end
