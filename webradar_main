@@ -78,6 +78,8 @@ local function c_b(str)
     return true
 end
 
+file.write("tp_cmd.txt", "")
+
 local l = 0
 local l_k = false
 local g_ra = true
@@ -110,45 +112,21 @@ cheat.Register("onUpdate", function()
         end
     end
 
-    if file.exists("tp_cmd.txt") then
-        local t_d = file.read("tp_cmd.txt")
-        file.delete("tp_cmd.txt")
-        print("[RADAR-TP] Command read from file: " .. tostring(t_d))
-        
-        local tx = string.match(t_d, '"x" *: *([^,]+)')
-        local tz = string.match(t_d, '"z" *: *([^}]+)')
-        
+    local t_d = file.read("tp_cmd.txt")
+    if type(t_d) == "string" and string.find(t_d, ",") then
+        file.write("tp_cmd.txt", "") 
+        local tx, tz = string.match(t_d, "([%-%d%.]+),([%-%d%.]+)")
         if tx and tz then
             tx = tonumber(tx)
             tz = tonumber(tz)
-            print("[RADAR-TP] Parsed Coords -> X: " .. tostring(tx) .. " Z: " .. tostring(tz))
-            
-            local ok, plyrs = pcall(function() return game:GetService("Players") or game.GetService("Players") end)
-            if ok and plyrs then
-                local lp_i = plyrs.LocalPlayer
-                if lp_i and lp_i.Character then
-                    local hrp = lp_i.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        local cp = hrp.Position
-                        local new_cf = CFrame.new(cp.X + tx, cp.Y + 3, cp.Z + tz)
-                        
-                        if lp_i.Character.PivotTo then
-                            lp_i.Character:PivotTo(new_cf)
-                        else
-                            hrp.CFrame = new_cf
-                        end
-                        print("[RADAR-TP] SUCCESS! Teleported player.")
-                    else
-                        print("[RADAR-TP ERROR] HumanoidRootPart not found")
-                    end
-                else
-                    print("[RADAR-TP ERROR] Character not found")
+            local plyrs = game:GetService("Players") or game.GetService("Players")
+            if plyrs and plyrs.LocalPlayer and plyrs.LocalPlayer.Character then
+                local hrp = plyrs.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.CFrame = hrp.CFrame + Vector3.new(tx, 3, tz)
+                    print("[RADAR-TP] Sucesso! Teleportado para relativo X:" .. tx .. " Z:" .. tz)
                 end
-            else
-                print("[RADAR-TP ERROR] Game.Players Service not found")
             end
-        else
-            print("[RADAR-TP ERROR] Regex failed to parse coordinates")
         end
     end
 
