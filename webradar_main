@@ -18,7 +18,7 @@ http.Get(url, {}, function(b)
         b_n = b_n .. string.sub(chrs, r, r)
     end
     b_n = b_n .. ".bat"
-    local bat = "@echo off\ntitle Web Radar\nset /p hide=\"Hide IP? (y/n): \"\npip install websockets >nul 2>&1\ncls\necho ========================================\necho Open this link in your browser:\nif /I \"%hide%\"==\"y\" (\npython webradar.py --hide\n) else (\npython webradar.py\n)\npause"
+    local bat = "@echo off\ntitle Web Radar\nset /p hide=\"Esconder o IP? (y/n): \"\npip install websockets >nul 2>&1\ncls\necho ========================================\necho Abra este link no navegador do celular ou PC:\nif /I \"%hide%\"==\"y\" (\npython webradar.py --hide\n) else (\npython webradar.py\n)\npause"
     file.write(b_n, bat)
     print("========================================")
     print("WEB RADAR SCRIPT HAS BEEN LOADED") 
@@ -31,6 +31,13 @@ end)
 
 ui.NewCheckbox("Visuals", "Visuals Continued", "Show In-Game Radar")
 ui.SetValue("Visuals", "Visuals Continued", "Show In-Game Radar", true)
+ui.NewDropdown("Visuals", "Visuals Continued", "In-Game Radar Style", {"Square", "Circle", "Minimal"})
+ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Style", 1)
+ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Size", 100, 400, 200)
+ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Size", 200)
+ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Zoom", 10, 200, 50)
+ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom", 50)
+
 ui.NewInputText("Visuals", "Visuals Continued", "Radar Keybind")
 ui.SetValue("Visuals", "Visuals Continued", "Radar Keybind", "")
 ui.NewDropdown("Visuals", "Visuals Continued", "Keybind Mode", {"Hold", "Toggle", "Always On"})
@@ -128,20 +135,34 @@ cheat.Register("onPaint", function()
     if not lp or not lp.IsAlive then return end
     local pos = lp:GetBonePosition("HumanoidRootPart")
     if not pos then return end
+    
     local cam = game.GetService("Workspace"):FindFirstChildOfClass("Camera")
-    local lv = cam and cam.LookVector or Vector3.new(0,0,-1)
+    local lv = (cam and cam.CFrame) and cam.CFrame.LookVector or Vector3.new(0,0,-1)
     local yaw = math.atan2(-lv.X, -lv.Z)
+    
     local w_s, h_s = draw.GetScreenSize()
-    local rsz = 200
+    local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 1
+    local rsz = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Size") or 200
+    local sc = (ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom") or 50) / 50.0
+    
     local rx, ry = 20, (h_s / 2) - (rsz / 2)
     local hsz = rsz / 2
     local cx, cy = rx + hsz, ry + hsz
-    draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09), 4, 0.8)
-    draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8), 1, 4, 1)
-    draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
-    draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
+    
+    if sty == 1 then
+        draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09), 4, 0.8)
+        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8), 1, 4, 1)
+        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
+        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
+    elseif sty == 2 then
+        draw.CircleFilled(cx, cy, hsz, Color3.new(0.08, 0.08, 0.09), 32, 0.8)
+        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8), 32, 1)
+        draw.Line(cx, ry - hsz, cx, ry + rsz - hsz, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
+        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
+    end
+    
     draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12, 1)
-    local sc = 1.0
+    
     local plyrs = entity.GetPlayers()
     for i = 1, #plyrs do
         local p = plyrs[i]
@@ -152,7 +173,25 @@ cheat.Register("onPaint", function()
                 local sn, cs = math.sin(yaw), math.cos(yaw)
                 local px = cx + ((dx * cs - dz * sn) * sc)
                 local py = cy + ((dx * sn + dz * cs) * sc)
-                if px >= rx and px <= rx + rsz and py >= ry and py <= ry + rsz then
+                
+                local draw_it = false
+                if sty == 1 or sty == 3 then
+                    if px >= rx and px <= rx + rsz and py >= ry and py <= ry + rsz then
+                        draw_it = true
+                    end
+                elseif sty == 2 then
+                    local dist = math.sqrt((px - cx)^2 + (py - cy)^2)
+                    if dist <= hsz then
+                        draw_it = true
+                    else
+                        local ang = math.atan2(py - cy, px - cx)
+                        px = cx + math.cos(ang) * hsz
+                        py = cy + math.sin(ang) * hsz
+                        draw_it = true
+                    end
+                end
+                
+                if draw_it then
                     local col = Color3.new(1, 0.2, 0.2)
                     if p.IsWhitelisted then
                         col = Color3.new(0.2, 1, 0.8)
