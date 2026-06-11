@@ -15,18 +15,13 @@ http.Get(url, {}, function(b)
     
     local chrs = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
     local b_n = "radar_"
-    local r_t = ""
     for i=1,8 do
         local r = utility.RandomInt(1, #chrs)
         b_n = b_n .. string.sub(chrs, r, r)
     end
-    for i=1,16 do
-        local r = utility.RandomInt(1, #chrs)
-        r_t = r_t .. string.sub(chrs, r, r)
-    end
     b_n = b_n .. ".bat"
     
-    local bat = "@echo off\ntitle " .. r_t .. "\npip install websockets >nul 2>&1\ncls\npython webradar.py\npause"
+    local bat = "@echo off\npip install websockets >nul 2>&1\ncls\npython webradar.py --hide\npause"
     
     file.write(b_n, bat)
     print("========================================")
@@ -42,7 +37,7 @@ ui.NewCheckbox("Visuals", "Visuals Continued", "Show In-Game Radar")
 ui.SetValue("Visuals", "Visuals Continued", "Show In-Game Radar", true)
 
 ui.NewDropdown("Visuals", "Visuals Continued", "In-Game Radar Style", {"Square", "Circle", "Minimal"})
-ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Style", 1)
+ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Style", 0)
 
 ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Size", 100, 400, 200)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Size", 200)
@@ -54,7 +49,7 @@ ui.NewInputText("Visuals", "Visuals Continued", "Radar Keybind")
 ui.SetValue("Visuals", "Visuals Continued", "Radar Keybind", "")
 
 ui.NewDropdown("Visuals", "Visuals Continued", "Keybind Mode", {"Hold", "Toggle", "Always On"})
-ui.SetValue("Visuals", "Visuals Continued", "Keybind Mode", 3)
+ui.SetValue("Visuals", "Visuals Continued", "Keybind Mode", 2)
 
 local m_p = {
     esc="Escape", escape="Escape", lctrl="Ctrl", rctrl="Ctrl", ctrl="Ctrl", control="Ctrl",
@@ -84,28 +79,33 @@ end
 local l = 0
 local l_k = false
 local g_ra = true
+local i_t = true
 
 cheat.Register("onUpdate", function()
     local c_v = ui.GetValue("Visuals", "Visuals Continued", "Show In-Game Radar")
     local md = ui.GetValue("Visuals", "Visuals Continued", "Keybind Mode")
     local bnd = ui.GetValue("Visuals", "Visuals Continued", "Radar Keybind")
     
+    local bnd_e = (type(bnd) ~= "string" or string.gsub(bnd, "%s+", "") == "")
     local i_p = c_b(bnd)
     
-    if md == 2 then
+    if md == 1 then
         if i_p and not l_k then
-            c_v = not c_v
-            ui.SetValue("Visuals", "Visuals Continued", "Show In-Game Radar", c_v)
+            i_t = not i_t
         end
     end
     l_k = i_p
     
-    if md == 3 then
-        g_ra = c_v
-    elseif md == 1 then
-        g_ra = c_v and i_p
-    elseif md == 2 then
-        g_ra = c_v
+    if not c_v then
+        g_ra = false
+    else
+        if md == 2 or bnd_e then
+            g_ra = true
+        elseif md == 0 then
+            g_ra = i_p
+        elseif md == 1 then
+            g_ra = i_t
+        end
     end
 
     local n = utility.GetTickCount()
@@ -167,7 +167,7 @@ cheat.Register("onPaint", function()
     local yaw = math.atan2(-lv.X, -lv.Z)
     
     local w_s, h_s = draw.GetScreenSize()
-    local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 1
+    local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 0
     local rsz = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Size") or 200
     local sc = (ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom") or 50) / 50.0
     
@@ -175,19 +175,19 @@ cheat.Register("onPaint", function()
     local hsz = rsz / 2
     local cx, cy = rx + hsz, ry + hsz
     
-    if sty == 1 then
-        draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09), 4, 0.8)
-        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8), 1, 4, 1)
-        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
-        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
-    elseif sty == 2 then
-        draw.CircleFilled(cx, cy, hsz, Color3.new(0.08, 0.08, 0.09), 32, 0.8)
-        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8), 32, 1)
-        draw.Line(cx, ry - hsz, cx, ry + rsz - hsz, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
-        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
+    if sty == 0 then
+        draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09), 4)
+        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8), 4)
+        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2))
+        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2))
+    elseif sty == 1 then
+        draw.CircleFilled(cx, cy, hsz, Color3.new(0.08, 0.08, 0.09), 32)
+        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8), 32)
+        draw.Line(cx, ry - hsz, cx, ry + rsz - hsz, Color3.new(0.2, 0.2, 0.2))
+        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2))
     end
     
-    draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12, 1)
+    draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12)
     
     local plyrs = entity.GetPlayers()
     for i = 1, #plyrs do
@@ -201,11 +201,11 @@ cheat.Register("onPaint", function()
                 local py = cy + ((dx * sn + dz * cs) * sc)
                 
                 local draw_it = false
-                if sty == 1 or sty == 3 then
+                if sty == 0 or sty == 2 then
                     if px >= rx and px <= rx + rsz and py >= ry and py <= ry + rsz then
                         draw_it = true
                     end
-                elseif sty == 2 then
+                elseif sty == 1 then
                     local dist = math.sqrt((px - cx)^2 + (py - cy)^2)
                     if dist <= hsz then
                         draw_it = true
@@ -224,7 +224,7 @@ cheat.Register("onPaint", function()
                     elseif not p.IsEnemy then
                         col = Color3.new(1, 1, 0.2)
                     end
-                    draw.CircleFilled(px, py, 3, col, 12, 1)
+                    draw.CircleFilled(px, py, 3, col, 12)
                 end
             end
         end
