@@ -1,15 +1,28 @@
 http.Get("https://raw.githubusercontent.com/NH3HD/scripts/refs/heads/main/webradar_py", {}, function(b)
     file.write("webradar.py", b)
-    file.write("start_radar.bat", "@echo off\ntitle Web Radar\npip install websockets >nul 2>&1\ncls\npython webradar.py\npause")
+    file.write("..\\start_radar.bat", "@echo off\ntitle Web Radar\npip install websockets >nul 2>&1\ncls\ncd files\npython webradar.py\npause")
     print("========================================")
-    print("WEB RADAR SCRIPT LOADED")
-    print("1. Open C:\\Serotonin\\files")
+    print("WEB RADAR LOADED")
+    print("1. Open C:\\Serotonin")
     print("2. Double-click 'start_radar.bat'")
-    print("3. Check the Python console for your IP link.")
+    print("3. Check Python console for IP link")
     print("========================================")
 end)
+local c_b = ui.NewCheckbox("Visuals", "Visuals Continued", "Show Web Radar")
+if c_b.SetValue then c_b:SetValue(true) end
+local h_k = ui.NewHotkey("Visuals", "Visuals Continued", "Web Radar Keybind")
 local l = 0
+local l_k = false
+local v_r = true
 cheat.Register("onUpdate", function()
+    if c_b.GetValue then v_r = c_b:GetValue() end
+    local k_a = false
+    if h_k.GetValue then k_a = h_k:GetValue() end
+    if k_a and not l_k then
+        v_r = not v_r
+        if c_b.SetValue then c_b:SetValue(v_r) end
+    end
+    l_k = k_a
     local n = utility.GetTickCount()
     if n - l < 25 then return end
     l = n
@@ -19,7 +32,7 @@ cheat.Register("onUpdate", function()
     if not r then return end
     local tg = entity.GetTarget()
     local ti = (tg and tg.IsAlive) and tg.UserId or -1
-    local o = "["
+    local o = string.format('{"v":%s,"p":[', v_r and "true" or "false")
     local e = entity.GetPlayers()
     local c = 0
     for i = 1, #e do
@@ -30,7 +43,7 @@ cheat.Register("onUpdate", function()
                 local x = b.X - r.X
                 local z = b.Z - r.Z
                 local nm = string.gsub(t.Name or "", '["\\]', '')
-                local w = (t.IsWhitelisted or not t.IsEnemy) and "true" or "false"
+                local w = t.IsWhitelisted and "true" or "false"
                 local is_t = (t.UserId == ti) and "true" or "false"
                 local rot = t:GetBoneRotation("Head")
                 local y = 0
@@ -43,6 +56,6 @@ cheat.Register("onUpdate", function()
             end
         end
     end
-    o = o .. "]"
+    o = o .. "]}"
     file.write("radar_data.json", o)
 end)
