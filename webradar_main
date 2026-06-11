@@ -1,26 +1,26 @@
 http.Get("https://raw.githubusercontent.com/NH3HD/scripts/refs/heads/main/webradar_py", {}, function(b)
     file.write("webradar.py", b)
-    file.write("..\\start_radar.bat", "@echo off\ntitle Web Radar\npip install websockets >nul 2>&1\ncls\ncd files\npython webradar.py\npause")
+    file.write("start_radar.bat", "@echo off\ntitle Web Radar\npip install websockets >nul 2>&1\ncls\npython webradar.py\npause")
     print("========================================")
-    print("WEB RADAR LOADED")
-    print("1. Open C:\\Serotonin")
+    print("WEB RADAR SCRIPT HAS BEEN LOADED") 
+    print("3. Check Python console for IP link") 
     print("2. Double-click 'start_radar.bat'")
-    print("3. Check Python console for IP link")
+    print("1. Open C:\\Serotonin\\files")
+    print("WEB RADAR SCRIPT HAS BEEN LOADED")
     print("========================================")
 end)
-local c_b = ui.NewCheckbox("Visuals", "Visuals Continued", "Show Web Radar")
-if c_b.SetValue then c_b:SetValue(true) end
-local h_k = ui.NewHotkey("Visuals", "Visuals Continued", "Web Radar Keybind")
+ui.NewCheckbox("Visuals", "Visuals Continued", "Show Web Radar")
+ui.SetValue("Visuals", "Visuals Continued", "Show Web Radar", true)
+ui.NewHotkey("Visuals", "Visuals Continued", "Web Radar Keybind")
 local l = 0
 local l_k = false
 local v_r = true
 cheat.Register("onUpdate", function()
-    if c_b.GetValue then v_r = c_b:GetValue() end
-    local k_a = false
-    if h_k.GetValue then k_a = h_k:GetValue() end
+    v_r = ui.GetValue("Visuals", "Visuals Continued", "Show Web Radar")
+    local k_a = ui.GetValue("Visuals", "Visuals Continued", "Web Radar Keybind")
     if k_a and not l_k then
         v_r = not v_r
-        if c_b.SetValue then c_b:SetValue(v_r) end
+        ui.SetValue("Visuals", "Visuals Continued", "Show Web Radar", v_r)
     end
     l_k = k_a
     local n = utility.GetTickCount()
