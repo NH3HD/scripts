@@ -1,10 +1,20 @@
-http.Get("https://raw.githubusercontent.com/NH3HD/scripts/refs/heads/main/webradar_py", {}, function(b)
+local url = "https://raw.githubusercontent.com/NH3HD/scripts/refs/heads/main/webradar_py?t=" .. tostring(utility.GetTickCount())
+http.Get(url, {}, function(b)
     file.write("webradar.py", b)
-    local v_c = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    local fls = file.listdir("")
+    if fls then
+        for i=1, #fls do
+            local f = fls[i]
+            if f.isFile and string.match(f.name, "^radar_.*%.bat$") then
+                file.delete(f.name)
+            end
+        end
+    end
+    local chrs = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_@#"
     local b_n = "radar_"
     for i=1,8 do
-        local r = utility.RandomInt(1, #v_c)
-        b_n = b_n .. string.sub(v_c, r, r)
+        local r = utility.RandomInt(1, #chrs)
+        b_n = b_n .. string.sub(chrs, r, r)
     end
     b_n = b_n .. ".bat"
     local bat = "@echo off\ntitle Web Radar\nset /p hide=\"Esconder o IP? (y/n): \"\npip install websockets >nul 2>&1\ncls\necho ========================================\necho Abra este link no navegador do celular ou PC:\nif /I \"%hide%\"==\"y\" (\npython webradar.py --hide\n) else (\npython webradar.py\n)\npause"
@@ -26,16 +36,14 @@ ui.NewDropdown("Visuals", "Visuals Continued", "Keybind Mode", {"Hold", "Toggle"
 ui.SetValue("Visuals", "Visuals Continued", "Keybind Mode", 3)
 
 local m_p = {
-    esc="Escape", escape="Escape",
-    lctrl="Ctrl", rctrl="Ctrl", ctrl="Ctrl", control="Ctrl",
-    lshift="Shift", rshift="Shift", shift="Shift",
-    alt="Alt", lalt="Alt", ralt="Alt", altgr="Alt",
+    esc="Escape", escape="Escape", lctrl="Ctrl", rctrl="Ctrl", ctrl="Ctrl", control="Ctrl",
+    lshift="Shift", rshift="Shift", shift="Shift", alt="Alt", lalt="Alt", ralt="Alt", altgr="Alt",
     space="Space", enter="Enter", return="Enter"
 }
 
 local function c_b(str)
     if type(str) ~= "string" or str == "" then return false end
-    str = string.gsub(str, " ", "")
+    str = string.gsub(str, "%s+", "")
     if str == "" then return false end
     str = string.lower(str)
     local p = {}
@@ -61,7 +69,6 @@ cheat.Register("onUpdate", function()
     local md = ui.GetValue("Visuals", "Visuals Continued", "Keybind Mode")
     local bnd = ui.GetValue("Visuals", "Visuals Continued", "Radar Keybind")
     local i_p = c_b(bnd)
-    
     if md == 2 then
         if i_p and not l_k then
             c_v = not c_v
@@ -69,7 +76,6 @@ cheat.Register("onUpdate", function()
         end
     end
     l_k = i_p
-
     if md == 3 then
         g_ra = c_v
     elseif md == 1 then
@@ -81,20 +87,15 @@ cheat.Register("onUpdate", function()
     local n = utility.GetTickCount()
     if n - l < 25 then return end
     l = n
-
     local p = entity.GetLocalPlayer()
     if not p or not p.IsAlive then return end
-    
     local r = p:GetBonePosition("HumanoidRootPart")
     if not r then return end
-
     local tg = entity.GetTarget()
     local ti = (tg and tg.IsAlive) and tg.UserId or -1
-
     local o = '{"v":true,"p":['
     local e = entity.GetPlayers()
     local c = 0
-
     for i = 1, #e do
         local t = e[i]
         if t.IsAlive then
@@ -105,13 +106,11 @@ cheat.Register("onUpdate", function()
                 local nm = string.gsub(t.Name or "", '["\\]', '')
                 local w = t.IsWhitelisted and "true" or "false"
                 local is_t = (t.UserId == ti) and "true" or "false"
-                
                 local rot = t:GetBoneRotation("Head")
                 local y = 0
                 if type(rot) == "table" and rot[9] and rot[3] then
                     y = math.atan2(-rot[9], -rot[3])
                 end
-                
                 if c > 0 then o = o .. "," end
                 o = o .. string.format('{"id":%d,"n":"%s","x":%.1f,"z":%.1f,"hp":%d,"mhp":%d,"w":%s,"t":%s,"y":%.3f}', t.UserId or 0, nm, x, z, t.Health or 100, t.MaxHealth or 100, w, is_t, y)
                 c = c + 1
@@ -119,7 +118,6 @@ cheat.Register("onUpdate", function()
         end
     end
     o = o .. "]}"
-    
     file.write("radar_data.json", o)
 end)
 
@@ -129,22 +127,19 @@ cheat.Register("onPaint", function()
     if not lp or not lp.IsAlive then return end
     local pos = lp:GetBonePosition("HumanoidRootPart")
     if not pos then return end
-    
     local cam = game.GetService("Workspace"):FindFirstChildOfClass("Camera")
     local lv = cam and cam.LookVector or Vector3.new(0,0,-1)
     local yaw = math.atan2(-lv.X, -lv.Z)
-    
-    local rx, ry = 20, 250
-    local rsz = 150
+    local w_s, h_s = draw.GetScreenSize()
+    local rsz = 200
+    local rx, ry = 20, (h_s / 2) - (rsz / 2)
     local hsz = rsz / 2
     local cx, cy = rx + hsz, ry + hsz
-    
     draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09), 4, 0.8)
     draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8), 1, 4, 1)
     draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
     draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1, 0.6)
     draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12, 1)
-    
     local sc = 1.0
     local plyrs = entity.GetPlayers()
     for i = 1, #plyrs do
@@ -156,7 +151,6 @@ cheat.Register("onPaint", function()
                 local sn, cs = math.sin(yaw), math.cos(yaw)
                 local px = cx + ((dx * cs - dz * sn) * sc)
                 local py = cy + ((dx * sn + dz * cs) * sc)
-                
                 if px >= rx and px <= rx + rsz and py >= ry and py <= ry + rsz then
                     local col = Color3.new(1, 0.2, 0.2)
                     if p.IsWhitelisted then
