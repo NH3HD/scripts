@@ -2,7 +2,6 @@ local url = "https://raw.githubusercontent.com/NH3HD/scripts/refs/heads/main/web
 http.Get(url, {}, function(b)
     if not b or #b == 0 then return end
     file.write("webradar.py", b)
-    
     local fls = file.listdir("")
     if fls then
         for i=1, #fls do
@@ -12,7 +11,6 @@ http.Get(url, {}, function(b)
             end
         end
     end
-    
     local chrs = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
     local b_n = "radar_"
     for i=1,8 do
@@ -20,9 +18,7 @@ http.Get(url, {}, function(b)
         b_n = b_n .. string.sub(chrs, r, r)
     end
     b_n = b_n .. ".bat"
-    
     local bat = "@echo off\npip install websockets >nul 2>&1\ncls\npython webradar.py --hide\npause"
-    
     file.write(b_n, bat)
     print("========================================")
     print("WEB RADAR SCRIPT HAS BEEN LOADED") 
@@ -176,18 +172,22 @@ cheat.Register("onPaint", function()
     local cx, cy = rx + hsz, ry + hsz
     
     if sty == 0 then
-        draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09), 4)
-        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8), 4)
+        draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09))
+        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8))
+        draw.Rect(rx - 1, ry - 1, rsz + 2, rsz + 2, Color3.new(0.15, 0.45, 0.4))
+        draw.Rect(rx - 2, ry - 2, rsz + 4, rsz + 4, Color3.new(0.07, 0.22, 0.2))
         draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2))
         draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2))
     elseif sty == 1 then
-        draw.CircleFilled(cx, cy, hsz, Color3.new(0.08, 0.08, 0.09), 32)
-        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8), 32)
-        draw.Line(cx, ry - hsz, cx, ry + rsz - hsz, Color3.new(0.2, 0.2, 0.2))
-        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2))
+        draw.CircleFilled(cx, cy, hsz, Color3.new(0.08, 0.08, 0.09))
+        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8))
+        draw.Circle(cx, cy, hsz + 1, Color3.new(0.15, 0.45, 0.4))
+        draw.Circle(cx, cy, hsz + 2, Color3.new(0.07, 0.22, 0.2))
+        draw.Line(cx, cy - hsz, cx, cy + hsz, Color3.new(0.2, 0.2, 0.2))
+        draw.Line(cx - hsz, cy, cx + hsz, cy, Color3.new(0.2, 0.2, 0.2))
     end
     
-    draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12)
+    draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94))
     
     local plyrs = entity.GetPlayers()
     for i = 1, #plyrs do
@@ -224,7 +224,7 @@ cheat.Register("onPaint", function()
                     elseif not p.IsEnemy then
                         col = Color3.new(1, 1, 0.2)
                     end
-                    draw.CircleFilled(px, py, 3, col, 12)
+                    draw.CircleFilled(px, py, 3, col)
                 end
             end
         end
