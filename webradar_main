@@ -1,5 +1,6 @@
 local url = "https://raw.githubusercontent.com/NH3HD/scripts/refs/heads/main/webradar_py?t=" .. tostring(utility.GetTickCount())
 http.Get(url, {}, function(b)
+    if not b or #b == 0 then return end
     file.write("webradar.py", b)
     local fls = file.listdir("")
     if fls then
@@ -17,7 +18,7 @@ http.Get(url, {}, function(b)
         b_n = b_n .. string.sub(chrs, r, r)
     end
     b_n = b_n .. ".bat"
-    local bat = "@echo off\ntitle Web Radar\nset /p hide=\"Esconder o IP? (y/n): \"\npip install websockets >nul 2>&1\ncls\necho ========================================\necho Abra este link no navegador do celular ou PC:\nif /I \"%hide%\"==\"y\" (\npython webradar.py --hide\n) else (\npython webradar.py\n)\npause"
+    local bat = "@echo off\ntitle Web Radar\nset /p hide=\"Hide IP? (y/n): \"\npip install websockets >nul 2>&1\ncls\necho ========================================\necho Open this link in your browser:\nif /I \"%hide%\"==\"y\" (\npython webradar.py --hide\n) else (\npython webradar.py\n)\npause"
     file.write(b_n, bat)
     print("========================================")
     print("WEB RADAR SCRIPT HAS BEEN LOADED") 
@@ -38,7 +39,7 @@ ui.SetValue("Visuals", "Visuals Continued", "Keybind Mode", 3)
 local m_p = {
     esc="Escape", escape="Escape", lctrl="Ctrl", rctrl="Ctrl", ctrl="Ctrl", control="Ctrl",
     lshift="Shift", rshift="Shift", shift="Shift", alt="Alt", lalt="Alt", ralt="Alt", altgr="Alt",
-    space="Space", enter="Enter", return="Enter"
+    space="Space", enter="Enter", ["return"]="Enter"
 }
 
 local function c_b(str)
