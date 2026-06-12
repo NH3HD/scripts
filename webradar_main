@@ -123,7 +123,7 @@ cheat.Register("onUpdate", function()
             print("[RADAR-TP] Coords read from txt: X=" .. tx .. " Z=" .. tz)
             
             local ok, err = pcall(function()
-                local plyrs = game:GetService("Players")
+                local plyrs = game.GetService("Players")
                 if plyrs and plyrs.LocalPlayer and plyrs.LocalPlayer.Character then
                     local hrp = plyrs.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                     if hrp then
@@ -221,7 +221,6 @@ cheat.Register("onPaint", function()
         draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
     elseif sty == 1 then
         draw.CircleFilled(cx, cy, hsz, Color3.new(0.08, 0.08, 0.09), 64)
-        -- Format: x, y, radius, color, segments, thickness
         draw.Circle(cx, cy, hsz + 3, Color3.new(0.03, 0.1, 0.08), 64, 1)
         draw.Circle(cx, cy, hsz + 2, Color3.new(0.06, 0.2, 0.17), 64, 1)
         draw.Circle(cx, cy, hsz + 1, Color3.new(0.12, 0.4, 0.35), 64, 1)
