@@ -124,19 +124,36 @@ cheat.Register("onUpdate", function()
             
             local ok, err = pcall(function()
                 local plyrs = game.GetService("Players")
-                if plyrs and plyrs.LocalPlayer and plyrs.LocalPlayer.Character then
-                    local hrp = plyrs.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        local dest = Vector3.new(hrp.Position.X + tx, hrp.Position.Y + 3, hrp.Position.Z + tz)
-                        if CFrame and CFrame.new then
-                            hrp.CFrame = CFrame.new(dest)
-                        else
-                            hrp.Position = dest
+                local lp_ent = entity.GetLocalPlayer()
+                
+                if plyrs and plyrs.LocalPlayer and plyrs.LocalPlayer.Character and lp_ent and lp_ent.IsAlive then
+                    local char = plyrs.LocalPlayer.Character
+                    local curr_pos = lp_ent:GetBonePosition("HumanoidRootPart")
+                    
+                    if curr_pos then
+                        local dest = Vector3.new(curr_pos.X + tx, curr_pos.Y + 5, curr_pos.Z + tz)
+                        
+                        -- Attempt MoveTo (safest for R6/R15 models)
+                        local m_ok = pcall(function() char:MoveTo(dest) end)
+                        if not m_ok then
+                            m_ok = pcall(function() char.MoveTo(char, dest) end)
                         end
-                        print("[RADAR-TP] SUCCESS! Player moved.")
+                        
+                        -- Fallback to PrimaryPart
+                        if not m_ok and char.PrimaryPart then
+                            m_ok = pcall(function() char.PrimaryPart.Position = dest end)
+                        end
+                        
+                        if m_ok then
+                            print("[RADAR-TP] SUCCESS! Player moved.")
+                        else
+                            print("[RADAR-TP] Fail: Sandbox blocked MoveTo/PrimaryPart.")
+                        end
                     else
-                        print("[RADAR-TP] Fail: HumanoidRootPart not found.")
+                        print("[RADAR-TP] Fail: Could not get current position.")
                     end
+                else
+                    print("[RADAR-TP] Fail: Character not initialized.")
                 end
             end)
             if not ok then print("[RADAR-TP] Lua Error: " .. tostring(err)) end
