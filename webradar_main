@@ -29,16 +29,18 @@ http.Get(url, {}, function(b)
     print("========================================")
 end)
 
+-- Main Config Controls
 ui.NewCheckbox("Visuals", "Visuals Continued", "Show In-Game Radar")
 ui.SetValue("Visuals", "Visuals Continued", "Show In-Game Radar", true)
 
 ui.NewDropdown("Visuals", "Visuals Continued", "In-Game Radar Style", {"Square", "Circle", "Minimal"})
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Style", 0)
 
-ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Size", 100, 400, 200)
+-- Size & Positioning Customization
+ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Size", 100, 500, 200)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Size", 200)
 
-ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Zoom", 10, 200, 50)
+ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Zoom", 10, 300, 50)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom", 50)
 
 ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Pos X", 0, 3000, 20)
@@ -47,11 +49,33 @@ ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Pos X", 20)
 ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Pos Y", 0, 2000, 300)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Pos Y", 300)
 
+-- Keybind Handling
 ui.NewInputText("Visuals", "Visuals Continued", "Radar Keybind")
 ui.SetValue("Visuals", "Visuals Continued", "Radar Keybind", "")
 
 ui.NewDropdown("Visuals", "Visuals Continued", "Keybind Mode", {"Hold", "Toggle", "Always On"})
 ui.SetValue("Visuals", "Visuals Continued", "Keybind Mode", 2)
+
+-- Advanced Styling & Theme Customization
+ui.NewSliderFloat("Visuals", "Visuals Continued", "Radar Background Alpha", 0.0, 1.0, 0.8)
+ui.SetValue("Visuals", "Visuals Continued", "Radar Background Alpha", 0.8)
+
+ui.NewSliderInt("Visuals", "Visuals Continued", "Radar Glow Layers", 0, 5, 3)
+ui.SetValue("Visuals", "Visuals Continued", "Radar Glow Layers", 3)
+
+ui.NewCheckbox("Visuals", "Visuals Continued", "Show Crosshair Lines")
+ui.SetValue("Visuals", "Visuals Continued", "Show Crosshair Lines", true)
+
+ui.NewCheckbox("Visuals", "Visuals Continued", "Show Dots Out of Bounds")
+ui.SetValue("Visuals", "Visuals Continued", "Show Dots Out of Bounds", true)
+
+-- Advanced Color Configuration & Overrides
+ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Border Color", Color3.new(0.3, 0.9, 0.8))
+ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Background Color", Color3.new(0.08, 0.08, 0.09))
+ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Enemy Color", Color3.new(1, 0.2, 0.2))
+ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Ally Color", Color3.new(1, 1, 0.2))
+ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Whitelist Color", Color3.new(0.2, 1, 0.8))
+ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Focused Target Color", Color3.new(1, 0.0, 1)) -- Focused Purple/Pink
 
 local m_p = {
     esc="Escape", escape="Escape", lctrl="Ctrl", rctrl="Ctrl", ctrl="Ctrl", control="Ctrl",
@@ -77,8 +101,6 @@ local function c_b(str)
     end
     return true
 end
-
-file.write("tp_cmd.txt", "")
 
 local l = 0
 local l_k = false
@@ -109,54 +131,6 @@ cheat.Register("onUpdate", function()
             g_ra = i_p
         elseif md == 1 then
             g_ra = i_t
-        end
-    end
-
-    -- Core TP Logic with IPC File read
-    local t_d = file.read("tp_cmd.txt")
-    if t_d and type(t_d) == "string" and string.find(t_d, ",") then
-        file.write("tp_cmd.txt", "") 
-        local tx, tz = string.match(t_d, "([%-%d%.]+),([%-%d%.]+)")
-        if tx and tz then
-            tx = tonumber(tx)
-            tz = tonumber(tz)
-            print("[RADAR-TP] Coords read from txt: X=" .. tx .. " Z=" .. tz)
-            
-            local ok, err = pcall(function()
-                local plyrs = game.GetService("Players")
-                local lp_ent = entity.GetLocalPlayer()
-                
-                if plyrs and plyrs.LocalPlayer and plyrs.LocalPlayer.Character and lp_ent and lp_ent.IsAlive then
-                    local char = plyrs.LocalPlayer.Character
-                    local curr_pos = lp_ent:GetBonePosition("HumanoidRootPart")
-                    
-                    if curr_pos then
-                        local dest = Vector3.new(curr_pos.X + tx, curr_pos.Y + 5, curr_pos.Z + tz)
-                        
-                        -- Attempt MoveTo (safest for R6/R15 models)
-                        local m_ok = pcall(function() char:MoveTo(dest) end)
-                        if not m_ok then
-                            m_ok = pcall(function() char.MoveTo(char, dest) end)
-                        end
-                        
-                        -- Fallback to PrimaryPart
-                        if not m_ok and char.PrimaryPart then
-                            m_ok = pcall(function() char.PrimaryPart.Position = dest end)
-                        end
-                        
-                        if m_ok then
-                            print("[RADAR-TP] SUCCESS! Player moved.")
-                        else
-                            print("[RADAR-TP] Fail: Sandbox blocked MoveTo/PrimaryPart.")
-                        end
-                    else
-                        print("[RADAR-TP] Fail: Could not get current position.")
-                    end
-                else
-                    print("[RADAR-TP] Fail: Character not initialized.")
-                end
-            end)
-            if not ok then print("[RADAR-TP] Lua Error: " .. tostring(err)) end
         end
     end
 
@@ -218,36 +192,58 @@ cheat.Register("onPaint", function()
     local lv = cam and cam.LookVector or Vector3.new(0,0,-1)
     local yaw = math.atan2(-lv.X, -lv.Z)
     
+    -- Load Customizer Modifiers
     local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 0
     local rsz = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Size") or 200
     local sc = (ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom") or 50) / 50.0
-    
     local rx = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Pos X") or 20
     local ry = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Pos Y") or 300
+    local alpha = ui.GetValue("Visuals", "Visuals Continued", "Radar Background Alpha") or 0.8
+    local glow_layers = ui.GetValue("Visuals", "Visuals Continued", "Radar Glow Layers") or 3
+    local show_cross = ui.GetValue("Visuals", "Visuals Continued", "Show Crosshair Lines")
+    local clamp_dots = ui.GetValue("Visuals", "Visuals Continued", "Show Dots Out of Bounds")
     
+    -- Fetch Configured Dynamic Colors
+    local c_border = ui.GetColor("Visuals", "Visuals Continued", "Radar Border Color") or Color3.new(0.3, 0.9, 0.8)
+    local c_bg = ui.GetColor("Visuals", "Visuals Continued", "Radar Background Color") or Color3.new(0.08, 0.08, 0.09)
+    local c_enemy = ui.GetColor("Visuals", "Visuals Continued", "Radar Enemy Color") or Color3.new(1, 0.2, 0.2)
+    local c_ally = ui.GetColor("Visuals", "Visuals Continued", "Radar Ally Color") or Color3.new(1, 1, 0.2)
+    local c_wl = ui.GetColor("Visuals", "Visuals Continued", "Radar Whitelist Color") or Color3.new(0.2, 1, 0.8)
+    local c_focus = ui.GetColor("Visuals", "Visuals Continued", "Radar Focused Target Color") or Color3.new(1, 0.0, 1)
+
     local hsz = rsz / 2
     local cx, cy = rx + hsz, ry + hsz
     
+    -- Render Base Shapes & Progressive Multi-layered Glow Outer Borders
     if sty == 0 then
-        draw.RectFilled(rx, ry, rsz, rsz, Color3.new(0.08, 0.08, 0.09))
-        draw.Rect(rx - 3, ry - 3, rsz + 6, rsz + 6, Color3.new(0.03, 0.1, 0.08), 1, 4)
-        draw.Rect(rx - 2, ry - 2, rsz + 4, rsz + 4, Color3.new(0.06, 0.2, 0.17), 1, 4)
-        draw.Rect(rx - 1, ry - 1, rsz + 2, rsz + 2, Color3.new(0.12, 0.4, 0.35), 1, 4)
-        draw.Rect(rx, ry, rsz, rsz, Color3.new(0.3, 0.9, 0.8), 1, 4)
-        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
-        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
+        draw.RectFilled(rx, ry, rsz, rsz, c_bg, 4, alpha)
+        for i = 1, glow_layers do
+            local factor = i * 0.04
+            draw.Rect(rx - i, ry - i, rsz + (i * 2), rsz + (i * 2), Color3.new(c_border.R * factor, c_border.G * factor, c_border.B * factor), i, 4)
+        end
+        draw.Rect(rx, ry, rsz, rsz, c_border, 4, 1)
+        if show_cross then
+            draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
+            draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
+        end
     elseif sty == 1 then
-        draw.CircleFilled(cx, cy, hsz, Color3.new(0.08, 0.08, 0.09), 64)
-        draw.Circle(cx, cy, hsz + 3, Color3.new(0.03, 0.1, 0.08), 64, 1)
-        draw.Circle(cx, cy, hsz + 2, Color3.new(0.06, 0.2, 0.17), 64, 1)
-        draw.Circle(cx, cy, hsz + 1, Color3.new(0.12, 0.4, 0.35), 64, 1)
-        draw.Circle(cx, cy, hsz, Color3.new(0.3, 0.9, 0.8), 64, 1)
-        draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
-        draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
+        draw.CircleFilled(cx, cy, hsz, c_bg, 64, alpha)
+        for i = 1, glow_layers do
+            local factor = i * 0.04
+            draw.Circle(cx, cy, hsz + i, Color3.new(c_border.R * factor, c_border.G * factor, c_border.B * factor), 64, i)
+        end
+        draw.Circle(cx, cy, hsz, c_border, 64, 1)
+        if show_cross then
+            draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
+            draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
+        end
     end
     
     draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12)
     
+    local act_tg = entity.GetTarget()
+    local act_ti = (act_tg and act_tg.IsAlive) and act_tg.UserId or -1
+
     local plyrs = entity.GetPlayers()
     for i = 1, #plyrs do
         local p = plyrs[i]
@@ -263,12 +259,16 @@ cheat.Register("onPaint", function()
                 if sty == 0 or sty == 2 then
                     if px >= rx and px <= rx + rsz and py >= ry and py <= ry + rsz then
                         draw_it = true
+                    elseif clamp_dots then
+                        px = math.max(rx, math.min(rx + rsz, px))
+                        py = math.max(ry, math.min(ry + rsz, py))
+                        draw_it = true
                     end
                 elseif sty == 1 then
                     local dist = math.sqrt((px - cx)^2 + (py - cy)^2)
                     if dist <= hsz then
                         draw_it = true
-                    else
+                    elseif clamp_dots then
                         local ang = math.atan2(py - cy, px - cx)
                         px = cx + math.cos(ang) * hsz
                         py = cy + math.sin(ang) * hsz
@@ -277,11 +277,14 @@ cheat.Register("onPaint", function()
                 end
                 
                 if draw_it then
-                    local col = Color3.new(1, 0.2, 0.2)
-                    if p.IsWhitelisted then
-                        col = Color3.new(0.2, 1, 0.8)
+                    -- Priority Evaluation Tree for Colors (Focused overrides Whitelist)
+                    local col = c_enemy
+                    if p.UserId == act_ti then
+                        col = c_focus
+                    elseif p.IsWhitelisted then
+                        col = c_wl
                     elseif not p.IsEnemy then
-                        col = Color3.new(1, 1, 0.2)
+                        col = c_ally
                     end
                     draw.CircleFilled(px, py, 3, col, 12)
                 end
