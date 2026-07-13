@@ -29,7 +29,7 @@ http.Get(url, {}, function(b)
     print("========================================")
 end)
 
--- UI Element Registration System (To hide/show correctly)
+-- Sistema de Registro de UI para Ocultar/Mostrar
 local ui_elems = {}
 
 local function addUI(type, name, ...)
@@ -96,12 +96,15 @@ ui.SetValue("Visuals", "Visuals Continued", "Radar Keybind", "")
 addUI("Dropdown", "Keybind Mode", {"Hold", "Toggle", "Always On"})
 ui.SetValue("Visuals", "Visuals Continued", "Keybind Mode", 2)
 
--- Handle hiding UI elements
+-- Função segura para Ocultar/Mostrar UI
 local function updateUIVisibility(state)
     if type(ui.SetVisible) == "function" then
         for i=1, #ui_elems do
             local e = ui_elems[i]
-            pcall(ui.SetVisible, "Visuals", "Visuals Continued", e.name, state)
+            local ok = pcall(ui.SetVisible, "Visuals", "Visuals Continued", e.name, state)
+            if not ok and e.id then
+                pcall(ui.SetVisible, e.id, state)
+            end
         end
     end
 end
@@ -131,14 +134,14 @@ local function c_b(str)
     return true
 end
 
--- Core runtime variables
+-- Variáveis Core
 local l = 0
 local l_k = false
 local g_ra = true
 local i_t = true
 local last_main_state = nil
 
--- Movement tracking for "Walking Direction" arrow
+-- Variáveis de rastreio de movimento
 local last_lp_x, last_lp_z = nil, nil
 local mov_yaw = nil
 
@@ -170,16 +173,20 @@ cheat.Register("onUpdate", function()
         end
     end
 
+    -- Rastreio de Movimento (Tracking do LocalPlayer)
     local p = entity.GetLocalPlayer()
     if p and p.IsAlive then
         local r = p:GetBonePosition("HumanoidRootPart")
         if r then
-            -- Movement direction tracking for Static Mode
             if last_lp_x and last_lp_z then
                 local dx = r.X - last_lp_x
                 local dz = r.Z - last_lp_z
-                if math.sqrt(dx*dx + dz*dz) > 0.05 then
+                -- Se andou o suficiente, salva o angulo
+                if (dx*dx + dz*dz) > 0.01 then
                     mov_yaw = math.atan2(dz, dx)
+                else
+                    -- Zera se estiver parado, pra voltar a seguir a camera
+                    mov_yaw = nil
                 end
             end
             last_lp_x, last_lp_z = r.X, r.Z
@@ -239,7 +246,7 @@ local function getC(name, def)
     return def
 end
 
--- Fail-proof Text Drawer
+-- Função Text Draw Fail-Proof
 local function drawT(x, y, text, color)
     local ok = pcall(draw.Text, x, y, text, color)
     if not ok then ok = pcall(draw.Text, text, x, y, color) end
@@ -255,8 +262,14 @@ cheat.Register("onPaint", function()
     local pos = lp:GetBonePosition("HumanoidRootPart")
     if not pos then return end
     
-    local cam = game.GetService("Workspace"):FindFirstChildOfClass("Camera")
-    local lv = (cam and cam.CFrame) and cam.CFrame.LookVector or Vector3.new(0,0,-1)
+    -- Correção Crítica da Câmera (CFrame.LookVector)
+    local ws = game.GetService("Workspace")
+    local cam = ws and ws.CurrentCamera
+    local lv = Vector3.new(0, 0, -1)
+    if cam then
+        local ok, cf = pcall(function() return cam.CFrame end)
+        if ok and cf then lv = cf.LookVector end
+    end
     local yaw = math.atan2(-lv.X, -lv.Z)
     
     local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 1
@@ -281,7 +294,7 @@ cheat.Register("onPaint", function()
     local cx, cy = rx + hsz, ry + hsz
     local sn, cs = math.sin(yaw), math.cos(yaw)
     
-    -- Radar Background & Border
+    -- Fundos e Linhas bases
     if sty == 0 then
         draw.RectFilled(rx, ry, rsz, rsz, c_bg)
         draw.Rect(rx, ry, rsz, rsz, c_border)
@@ -290,7 +303,7 @@ cheat.Register("onPaint", function()
             draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.3, 0.3, 0.3))
         end
     elseif sty == 1 then
-        draw.CircleFilled(cx, cy, hsz, c_bg)
+        draw.CircleFilled(cx, cy, hsz, c_bg, 64)
         local segs = 64
         local p_x, p_y = cx + hsz, cy
         for j = 1, segs do
@@ -311,7 +324,7 @@ cheat.Register("onPaint", function()
         end
     end
     
-    -- Compass (Rosa dos Ventos)
+    -- Rosa dos Ventos / Compasso
     if s_cp and sty ~= 2 then
         local dirs = {
             {n="E", a=0}, {n="SE", a=math.pi/4}, {n="S", a=math.pi/2}, {n="SW", a=3*math.pi/4},
@@ -320,6 +333,7 @@ cheat.Register("onPaint", function()
         for i=1, #dirs do
             local d = dirs[i]
             local scr_a = d.a
+            -- Se rot_cam tá ativo, as letras do compasso precisam girar no sentido inverso para indicar onde o mundo está
             if rot_cam then scr_a = scr_a - yaw end
             
             local c_dist
@@ -333,20 +347,23 @@ cheat.Register("onPaint", function()
             local px = cx + math.cos(scr_a) * c_dist
             local py = cy + math.sin(scr_a) * c_dist
             
-            drawT(px - 6, py - 6, d.n, Color3.new(0.8, 0.8, 0.8))
+            -- Posição do texto ajustada pra não colar na linha
+            drawT(px - 5, py - 5, d.n, Color3.new(0.8, 0.8, 0.8))
         end
     end
     
-    -- View Cone / Local Player Indicator
-    draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94))
+    -- Local Player Ponto Central
+    draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12)
     
+    -- View Cone (Seta Direcional)
     if rot_cam then
-        -- Static UP Arrow because world rotates around player
+        -- Se o mapa gira, a nossa seta sempre aponta pra CIMA fixo
         draw.Line(cx, cy, cx - 6, cy - 12, Color3.new(0.4, 0.98, 0.94))
         draw.Line(cx, cy, cx + 6, cy - 12, Color3.new(0.4, 0.98, 0.94))
         draw.Line(cx, cy, cx, cy - 12, Color3.new(0.4, 0.98, 0.94))
     else
-        -- Dynamic Arrow based on movement direction (fallback to look vector)
+        -- Se o mapa ta parado, a seta rotaciona
+        -- mov_yaw diz pra onde estamos andando. Se nil (parado), usamos a camera (lv)
         local arrow_yaw = mov_yaw or math.atan2(lv.Z, lv.X)
         local tip_x = cx + math.cos(arrow_yaw) * 12
         local tip_y = cy + math.sin(arrow_yaw) * 12
@@ -411,7 +428,7 @@ cheat.Register("onPaint", function()
                     elseif not p.IsEnemy then
                         col = c_ally
                     end
-                    draw.CircleFilled(px, py, 3, col)
+                    draw.CircleFilled(px, py, 3, col, 12)
                 end
             end
         end
