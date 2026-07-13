@@ -29,14 +29,16 @@ http.Get(url, {}, function(b)
     print("========================================")
 end)
 
--- Main Config Controls
+-- Core Settings
 ui.NewCheckbox("Visuals", "Visuals Continued", "Show In-Game Radar")
 ui.SetValue("Visuals", "Visuals Continued", "Show In-Game Radar", true)
 
 ui.NewDropdown("Visuals", "Visuals Continued", "In-Game Radar Style", {"Square", "Circle", "Minimal"})
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Style", 0)
 
--- Size & Positioning Customization
+ui.NewDropdown("Visuals", "Visuals Continued", "In-Game Radar Theme", {"Default", "Miami Vice", "Hacker", "Monochrome"})
+ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Theme", 0)
+
 ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Size", 100, 500, 200)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Size", 200)
 
@@ -49,33 +51,30 @@ ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Pos X", 20)
 ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Pos Y", 0, 2000, 300)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Pos Y", 300)
 
--- Keybind Handling
+-- Visibility Modifiers
+ui.NewSliderInt("Visuals", "Visuals Continued", "Radar BG Alpha (%)", 0, 100, 80)
+ui.SetValue("Visuals", "Visuals Continued", "Radar BG Alpha (%)", 80)
+
+ui.NewCheckbox("Visuals", "Visuals Continued", "Show Crosshair Lines")
+ui.SetValue("Visuals", "Visuals Continued", "Show Crosshair Lines", true)
+
+ui.NewCheckbox("Visuals", "Visuals Continued", "Clamp Dots to Border")
+ui.SetValue("Visuals", "Visuals Continued", "Clamp Dots to Border", true)
+
+-- Keybind settings
 ui.NewInputText("Visuals", "Visuals Continued", "Radar Keybind")
 ui.SetValue("Visuals", "Visuals Continued", "Radar Keybind", "")
 
 ui.NewDropdown("Visuals", "Visuals Continued", "Keybind Mode", {"Hold", "Toggle", "Always On"})
 ui.SetValue("Visuals", "Visuals Continued", "Keybind Mode", 2)
 
--- Advanced Styling & Theme Customization
-ui.NewSliderFloat("Visuals", "Visuals Continued", "Radar Background Alpha", 0.0, 1.0, 0.8)
-ui.SetValue("Visuals", "Visuals Continued", "Radar Background Alpha", 0.8)
-
-ui.NewSliderInt("Visuals", "Visuals Continued", "Radar Glow Layers", 0, 5, 3)
-ui.SetValue("Visuals", "Visuals Continued", "Radar Glow Layers", 3)
-
-ui.NewCheckbox("Visuals", "Visuals Continued", "Show Crosshair Lines")
-ui.SetValue("Visuals", "Visuals Continued", "Show Crosshair Lines", true)
-
-ui.NewCheckbox("Visuals", "Visuals Continued", "Show Dots Out of Bounds")
-ui.SetValue("Visuals", "Visuals Continued", "Show Dots Out of Bounds", true)
-
--- Advanced Color Configuration & Overrides
-ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Border Color", Color3.new(0.3, 0.9, 0.8))
-ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Background Color", Color3.new(0.08, 0.08, 0.09))
-ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Enemy Color", Color3.new(1, 0.2, 0.2))
-ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Ally Color", Color3.new(1, 1, 0.2))
-ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Whitelist Color", Color3.new(0.2, 1, 0.8))
-ui.NewColorPicker("Visuals", "Visuals Continued", "Radar Focused Target Color", Color3.new(1, 0.0, 1)) -- Focused Purple/Pink
+-- Safely configured default theme palette to bypass Serotonin colorpicker issues
+local t_cols = {
+    [0] = { bg = Color3.new(0.08, 0.08, 0.09), border = Color3.new(0.3, 0.9, 0.8), enemy = Color3.new(1, 0.2, 0.2), ally = Color3.new(1, 1, 0.2), wl = Color3.new(0.2, 1, 0.8), focus = Color3.new(1, 0.2, 1) },
+    [1] = { bg = Color3.new(0.1, 0.05, 0.1), border = Color3.new(1, 0.3, 0.7), enemy = Color3.new(0.3, 0.9, 1), ally = Color3.new(1, 1, 1), wl = Color3.new(0.9, 0.9, 0.2), focus = Color3.new(1, 0.1, 0.1) },
+    [2] = { bg = Color3.new(0.02, 0.08, 0.02), border = Color3.new(0.2, 1, 0.2), enemy = Color3.new(1, 1, 1), ally = Color3.new(0.4, 0.4, 0.4), wl = Color3.new(0.5, 1, 0.5), focus = Color3.new(1, 0, 0) },
+    [3] = { bg = Color3.new(0.1, 0.1, 0.1), border = Color3.new(0.8, 0.8, 0.8), enemy = Color3.new(0.9, 0.9, 0.9), ally = Color3.new(0.5, 0.5, 0.5), wl = Color3.new(1, 1, 1), focus = Color3.new(0.3, 0.3, 0.3) }
+}
 
 local m_p = {
     esc="Escape", escape="Escape", lctrl="Ctrl", rctrl="Ctrl", ctrl="Ctrl", control="Ctrl",
@@ -192,50 +191,38 @@ cheat.Register("onPaint", function()
     local lv = cam and cam.LookVector or Vector3.new(0,0,-1)
     local yaw = math.atan2(-lv.X, -lv.Z)
     
-    -- Load Customizer Modifiers
     local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 0
+    local t_idx = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Theme") or 0
     local rsz = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Size") or 200
     local sc = (ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom") or 50) / 50.0
     local rx = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Pos X") or 20
     local ry = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Pos Y") or 300
-    local alpha = ui.GetValue("Visuals", "Visuals Continued", "Radar Background Alpha") or 0.8
-    local glow_layers = ui.GetValue("Visuals", "Visuals Continued", "Radar Glow Layers") or 3
-    local show_cross = ui.GetValue("Visuals", "Visuals Continued", "Show Crosshair Lines")
-    local clamp_dots = ui.GetValue("Visuals", "Visuals Continued", "Show Dots Out of Bounds")
     
-    -- Fetch Configured Dynamic Colors
-    local c_border = ui.GetColor("Visuals", "Visuals Continued", "Radar Border Color") or Color3.new(0.3, 0.9, 0.8)
-    local c_bg = ui.GetColor("Visuals", "Visuals Continued", "Radar Background Color") or Color3.new(0.08, 0.08, 0.09)
-    local c_enemy = ui.GetColor("Visuals", "Visuals Continued", "Radar Enemy Color") or Color3.new(1, 0.2, 0.2)
-    local c_ally = ui.GetColor("Visuals", "Visuals Continued", "Radar Ally Color") or Color3.new(1, 1, 0.2)
-    local c_wl = ui.GetColor("Visuals", "Visuals Continued", "Radar Whitelist Color") or Color3.new(0.2, 1, 0.8)
-    local c_focus = ui.GetColor("Visuals", "Visuals Continued", "Radar Focused Target Color") or Color3.new(1, 0.0, 1)
-
+    local alpha_pct = ui.GetValue("Visuals", "Visuals Continued", "Radar BG Alpha (%)") or 80
+    local bg_alpha = alpha_pct / 100.0
+    
+    local s_cr = ui.GetValue("Visuals", "Visuals Continued", "Show Crosshair Lines")
+    local c_dt = ui.GetValue("Visuals", "Visuals Continued", "Clamp Dots to Border")
+    
+    local theme = t_cols[t_idx] or t_cols[0]
+    
     local hsz = rsz / 2
     local cx, cy = rx + hsz, ry + hsz
     
-    -- Render Base Shapes & Progressive Multi-layered Glow Outer Borders
+    -- Rendering using strictly ONE layer for border line to ensure 1px ultra-thin lines
     if sty == 0 then
-        draw.RectFilled(rx, ry, rsz, rsz, c_bg, 4, alpha)
-        for i = 1, glow_layers do
-            local factor = i * 0.04
-            draw.Rect(rx - i, ry - i, rsz + (i * 2), rsz + (i * 2), Color3.new(c_border.R * factor, c_border.G * factor, c_border.B * factor), i, 4)
-        end
-        draw.Rect(rx, ry, rsz, rsz, c_border, 4, 1)
-        if show_cross then
-            draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
-            draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
+        draw.RectFilled(rx, ry, rsz, rsz, theme.bg, 4, bg_alpha)
+        draw.Rect(rx, ry, rsz, rsz, theme.border, 1, 4, 1) -- Thinnest possible Rect outline
+        if s_cr then
+            draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.3, 0.3, 0.3), 1)
+            draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.3, 0.3, 0.3), 1)
         end
     elseif sty == 1 then
-        draw.CircleFilled(cx, cy, hsz, c_bg, 64, alpha)
-        for i = 1, glow_layers do
-            local factor = i * 0.04
-            draw.Circle(cx, cy, hsz + i, Color3.new(c_border.R * factor, c_border.G * factor, c_border.B * factor), 64, i)
-        end
-        draw.Circle(cx, cy, hsz, c_border, 64, 1)
-        if show_cross then
-            draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.2, 0.2, 0.2), 1)
-            draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.2, 0.2, 0.2), 1)
+        draw.CircleFilled(cx, cy, hsz, theme.bg, 64, bg_alpha)
+        draw.Circle(cx, cy, hsz, theme.border, 64, 1) -- Parameter: Segments=64, Thickness=1
+        if s_cr then
+            draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.3, 0.3, 0.3), 1)
+            draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.3, 0.3, 0.3), 1)
         end
     end
     
@@ -259,7 +246,7 @@ cheat.Register("onPaint", function()
                 if sty == 0 or sty == 2 then
                     if px >= rx and px <= rx + rsz and py >= ry and py <= ry + rsz then
                         draw_it = true
-                    elseif clamp_dots then
+                    elseif c_dt then
                         px = math.max(rx, math.min(rx + rsz, px))
                         py = math.max(ry, math.min(ry + rsz, py))
                         draw_it = true
@@ -268,7 +255,7 @@ cheat.Register("onPaint", function()
                     local dist = math.sqrt((px - cx)^2 + (py - cy)^2)
                     if dist <= hsz then
                         draw_it = true
-                    elseif clamp_dots then
+                    elseif c_dt then
                         local ang = math.atan2(py - cy, px - cx)
                         px = cx + math.cos(ang) * hsz
                         py = cy + math.sin(ang) * hsz
@@ -277,14 +264,13 @@ cheat.Register("onPaint", function()
                 end
                 
                 if draw_it then
-                    -- Priority Evaluation Tree for Colors (Focused overrides Whitelist)
-                    local col = c_enemy
+                    local col = theme.enemy
                     if p.UserId == act_ti then
-                        col = c_focus
+                        col = theme.focus
                     elseif p.IsWhitelisted then
-                        col = c_wl
+                        col = theme.wl
                     elseif not p.IsEnemy then
-                        col = c_ally
+                        col = theme.ally
                     end
                     draw.CircleFilled(px, py, 3, col, 12)
                 end
