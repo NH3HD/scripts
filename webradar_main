@@ -34,7 +34,7 @@ ui.NewCheckbox("Visuals", "Visuals Continued", "Show In-Game Radar")
 ui.SetValue("Visuals", "Visuals Continued", "Show In-Game Radar", true)
 
 ui.NewDropdown("Visuals", "Visuals Continued", "In-Game Radar Style", {"Square", "Circle", "Minimal"})
-ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Style", 0)
+ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Style", 1)
 
 ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Size", 100, 500, 200)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Size", 200)
@@ -53,6 +53,9 @@ ui.SetValue("Visuals", "Visuals Continued", "Show Crosshair Lines", true)
 
 ui.NewCheckbox("Visuals", "Visuals Continued", "Show Out of Field")
 ui.SetValue("Visuals", "Visuals Continued", "Show Out of Field", true)
+
+ui.NewCheckbox("Visuals", "Visuals Continued", "Show North Indicator")
+ui.SetValue("Visuals", "Visuals Continued", "Show North Indicator", true)
 
 -- Custom ColorPickers (Fail-proof)
 local function cEdit(name)
@@ -199,7 +202,7 @@ cheat.Register("onPaint", function()
     local lv = cam and cam.LookVector or Vector3.new(0,0,-1)
     local yaw = math.atan2(-lv.X, -lv.Z)
     
-    local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 0
+    local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 1
     local rsz = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Size") or 200
     local sc = (ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom") or 50) / 50.0
     local rx = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Pos X") or 20
@@ -207,6 +210,7 @@ cheat.Register("onPaint", function()
     
     local s_cr = ui.GetValue("Visuals", "Visuals Continued", "Show Crosshair Lines")
     local c_dt = ui.GetValue("Visuals", "Visuals Continued", "Show Out of Field")
+    local s_no = ui.GetValue("Visuals", "Visuals Continued", "Show North Indicator")
     
     -- Dynamic Custom Colors
     local c_bg = getC("Radar Background Color", Color3.new(0.08, 0.08, 0.09))
@@ -219,8 +223,8 @@ cheat.Register("onPaint", function()
     local hsz = rsz / 2
     local cx, cy = rx + hsz, ry + hsz
     
-    -- Shapes without optional parameters that break API rendering
     if sty == 0 then
+        -- SQUARE
         draw.RectFilled(rx, ry, rsz, rsz, c_bg)
         draw.Rect(rx, ry, rsz, rsz, c_border)
         if s_cr then
@@ -228,21 +232,47 @@ cheat.Register("onPaint", function()
             draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.3, 0.3, 0.3))
         end
     elseif sty == 1 then
-        draw.CircleFilled(cx, cy, hsz, c_bg)
-        draw.Circle(cx, cy, hsz, c_border)
+        -- CIRCLE (Mathematically perfect 1px smooth circle)
+        draw.CircleFilled(cx, cy, hsz, c_bg, 64)
+        
+        local segs = 64
+        local p_x, p_y = cx + hsz, cy
+        for j = 1, segs do
+            local ang = (j / segs) * math.pi * 2
+            local n_x = cx + math.cos(ang) * hsz
+            local n_y = cy + math.sin(ang) * hsz
+            draw.Line(p_x, p_y, n_x, n_y, c_border)
+            p_x, p_y = n_x, n_y
+        end
+        
         if s_cr then
             draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.3, 0.3, 0.3))
             draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.3, 0.3, 0.3))
         end
     elseif sty == 2 then
-        -- Minimal Style: only crosshair (if active) and dots, no borders
+        -- MINIMAL
         if s_cr then
             draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.3, 0.3, 0.3))
             draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.3, 0.3, 0.3))
         end
     end
     
-    draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94))
+    -- Local Player Dot & View Cone
+    draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12)
+    draw.Line(cx, cy, cx - 6, cy - 12, Color3.new(0.4, 0.98, 0.94))
+    draw.Line(cx, cy, cx + 6, cy - 12, Color3.new(0.4, 0.98, 0.94))
+    
+    -- Dynamic North Indicator
+    if s_no and sty ~= 2 then
+        local sn, cs = math.sin(yaw), math.cos(yaw)
+        local n_dist = hsz - 12
+        local n_px = cx + (0 * cs - (-1) * sn) * n_dist
+        local n_py = cy + (0 * sn + (-1) * cs) * n_dist
+        
+        draw.Line(n_px - 4, n_py + 5, n_px - 4, n_py - 5, Color3.new(1, 0.2, 0.2))
+        draw.Line(n_px - 4, n_py - 5, n_px + 4, n_py + 5, Color3.new(1, 0.2, 0.2))
+        draw.Line(n_px + 4, n_py + 5, n_px + 4, n_py - 5, Color3.new(1, 0.2, 0.2))
+    end
     
     local act_tg = entity.GetTarget()
     local act_ti = (act_tg and act_tg.IsAlive) and act_tg.UserId or -1
@@ -288,7 +318,7 @@ cheat.Register("onPaint", function()
                     elseif not p.IsEnemy then
                         col = c_ally
                     end
-                    draw.CircleFilled(px, py, 3, col)
+                    draw.CircleFilled(px, py, 3, col, 12)
                 end
             end
         end
