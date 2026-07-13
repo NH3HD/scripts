@@ -29,53 +29,84 @@ http.Get(url, {}, function(b)
     print("========================================")
 end)
 
--- Visual Settings
+local ui_elems = {}
+
+local function addUI(type, name, ...)
+    local id
+    if type == "Checkbox" then id = ui.NewCheckbox("Visuals", "Visuals Continued", name)
+    elseif type == "Dropdown" then id = ui.NewDropdown("Visuals", "Visuals Continued", name, ...)
+    elseif type == "SliderInt" then id = ui.NewSliderInt("Visuals", "Visuals Continued", name, ...)
+    elseif type == "InputText" then id = ui.NewInputText("Visuals", "Visuals Continued", name)
+    end
+    table.insert(ui_elems, {name=name, id=id})
+end
+
+local function addColor(name)
+    local id
+    if type(ui.NewColorEdit) == "function" then
+        local ok, ret = pcall(ui.NewColorEdit, "Visuals", "Visuals Continued", name)
+        if ok then id = ret end
+    end
+    table.insert(ui_elems, {name=name, id=id})
+end
+
 ui.NewCheckbox("Visuals", "Visuals Continued", "Show In-Game Radar")
 ui.SetValue("Visuals", "Visuals Continued", "Show In-Game Radar", true)
 
-ui.NewDropdown("Visuals", "Visuals Continued", "In-Game Radar Style", {"Square", "Circle", "Minimal"})
+addUI("Checkbox", "Rotate with Camera")
+ui.SetValue("Visuals", "Visuals Continued", "Rotate with Camera", true)
+
+addUI("Dropdown", "In-Game Radar Style", {"Square", "Circle", "Minimal"})
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Style", 1)
 
-ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Size", 100, 500, 200)
+addUI("SliderInt", "In-Game Radar Size", 100, 500, 200)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Size", 200)
 
-ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Zoom", 10, 300, 50)
+addUI("SliderInt", "In-Game Radar Zoom", 10, 300, 50)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom", 50)
 
-ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Pos X", 0, 3000, 20)
+addUI("SliderInt", "In-Game Radar Pos X", 0, 3000, 20)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Pos X", 20)
 
-ui.NewSliderInt("Visuals", "Visuals Continued", "In-Game Radar Pos Y", 0, 2000, 300)
+addUI("SliderInt", "In-Game Radar Pos Y", 0, 2000, 300)
 ui.SetValue("Visuals", "Visuals Continued", "In-Game Radar Pos Y", 300)
 
-ui.NewCheckbox("Visuals", "Visuals Continued", "Show Crosshair Lines")
+addUI("Checkbox", "Show Crosshair Lines")
 ui.SetValue("Visuals", "Visuals Continued", "Show Crosshair Lines", true)
 
-ui.NewCheckbox("Visuals", "Visuals Continued", "Show Out of Field")
+addUI("Checkbox", "Show Out of Field")
 ui.SetValue("Visuals", "Visuals Continued", "Show Out of Field", true)
 
-ui.NewCheckbox("Visuals", "Visuals Continued", "Show North Indicator")
-ui.SetValue("Visuals", "Visuals Continued", "Show North Indicator", true)
+addUI("Checkbox", "Show Compass")
+ui.SetValue("Visuals", "Visuals Continued", "Show Compass", true)
 
--- Custom ColorPickers (Fail-proof)
-local function cEdit(name)
-    if type(ui.NewColorEdit) == "function" then
-        pcall(ui.NewColorEdit, "Visuals", "Visuals Continued", name)
-    end
-end
-cEdit("Radar Background Color")
-cEdit("Radar Border Color")
-cEdit("Radar Enemy Color")
-cEdit("Radar Ally Color")
-cEdit("Radar Whitelist Color")
-cEdit("Radar Focused Target Color")
+addColor("Radar Background Color")
+addColor("Radar Border Color")
+addColor("Radar Enemy Color")
+addColor("Radar Ally Color")
+addColor("Radar Whitelist Color")
+addColor("Radar Focused Target Color")
 
--- Keybinds
-ui.NewInputText("Visuals", "Visuals Continued", "Radar Keybind")
+addUI("InputText", "Radar Keybind")
 ui.SetValue("Visuals", "Visuals Continued", "Radar Keybind", "")
 
-ui.NewDropdown("Visuals", "Visuals Continued", "Keybind Mode", {"Hold", "Toggle", "Always On"})
+addUI("Dropdown", "Keybind Mode", {"Hold", "Toggle", "Always On"})
 ui.SetValue("Visuals", "Visuals Continued", "Keybind Mode", 2)
+
+local function updateUIVisibility(state)
+    if type(ui.SetVisible) == "function" then
+        for i=1, #ui_elems do
+            local e = ui_elems[i]
+            local ok = false
+            if e.id then
+                ok = pcall(ui.SetVisible, e.id, state)
+            end
+            if not ok then
+                pcall(ui.SetVisible, "Visuals", "Visuals Continued", e.name, state)
+            end
+        end
+    end
+end
 
 local m_p = {
     esc="Escape", escape="Escape", lctrl="Ctrl", rctrl="Ctrl", ctrl="Ctrl", control="Ctrl",
@@ -106,9 +137,15 @@ local l = 0
 local l_k = false
 local g_ra = true
 local i_t = true
+local last_main_state = nil
 
 cheat.Register("onUpdate", function()
     local c_v = ui.GetValue("Visuals", "Visuals Continued", "Show In-Game Radar")
+    if c_v ~= last_main_state then
+        last_main_state = c_v
+        updateUIVisibility(c_v)
+    end
+    
     local md = ui.GetValue("Visuals", "Visuals Continued", "Keybind Mode")
     local bnd = ui.GetValue("Visuals", "Visuals Continued", "Radar Keybind")
     
@@ -203,6 +240,7 @@ cheat.Register("onPaint", function()
     local yaw = math.atan2(-lv.X, -lv.Z)
     
     local sty = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Style") or 1
+    local rot_cam = ui.GetValue("Visuals", "Visuals Continued", "Rotate with Camera")
     local rsz = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Size") or 200
     local sc = (ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Zoom") or 50) / 50.0
     local rx = ui.GetValue("Visuals", "Visuals Continued", "In-Game Radar Pos X") or 20
@@ -210,9 +248,8 @@ cheat.Register("onPaint", function()
     
     local s_cr = ui.GetValue("Visuals", "Visuals Continued", "Show Crosshair Lines")
     local c_dt = ui.GetValue("Visuals", "Visuals Continued", "Show Out of Field")
-    local s_no = ui.GetValue("Visuals", "Visuals Continued", "Show North Indicator")
+    local s_cp = ui.GetValue("Visuals", "Visuals Continued", "Show Compass")
     
-    -- Dynamic Custom Colors
     local c_bg = getC("Radar Background Color", Color3.new(0.08, 0.08, 0.09))
     local c_border = getC("Radar Border Color", Color3.new(0.3, 0.9, 0.8))
     local c_enemy = getC("Radar Enemy Color", Color3.new(1, 0.2, 0.2))
@@ -222,9 +259,9 @@ cheat.Register("onPaint", function()
     
     local hsz = rsz / 2
     local cx, cy = rx + hsz, ry + hsz
+    local sn, cs = math.sin(yaw), math.cos(yaw)
     
     if sty == 0 then
-        -- SQUARE
         draw.RectFilled(rx, ry, rsz, rsz, c_bg)
         draw.Rect(rx, ry, rsz, rsz, c_border)
         if s_cr then
@@ -232,9 +269,7 @@ cheat.Register("onPaint", function()
             draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.3, 0.3, 0.3))
         end
     elseif sty == 1 then
-        -- CIRCLE (Mathematically perfect 1px smooth circle)
         draw.CircleFilled(cx, cy, hsz, c_bg, 64)
-        
         local segs = 64
         local p_x, p_y = cx + hsz, cy
         for j = 1, segs do
@@ -244,34 +279,60 @@ cheat.Register("onPaint", function()
             draw.Line(p_x, p_y, n_x, n_y, c_border)
             p_x, p_y = n_x, n_y
         end
-        
         if s_cr then
             draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.3, 0.3, 0.3))
             draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.3, 0.3, 0.3))
         end
     elseif sty == 2 then
-        -- MINIMAL
         if s_cr then
             draw.Line(cx, ry, cx, ry + rsz, Color3.new(0.3, 0.3, 0.3))
             draw.Line(rx, cy, rx + rsz, cy, Color3.new(0.3, 0.3, 0.3))
         end
     end
     
-    -- Local Player Dot & View Cone
     draw.CircleFilled(cx, cy, 3, Color3.new(0.4, 0.98, 0.94), 12)
-    draw.Line(cx, cy, cx - 6, cy - 12, Color3.new(0.4, 0.98, 0.94))
-    draw.Line(cx, cy, cx + 6, cy - 12, Color3.new(0.4, 0.98, 0.94))
     
-    -- Dynamic North Indicator
-    if s_no and sty ~= 2 then
-        local sn, cs = math.sin(yaw), math.cos(yaw)
-        local n_dist = hsz - 12
-        local n_px = cx + (0 * cs - (-1) * sn) * n_dist
-        local n_py = cy + (0 * sn + (-1) * cs) * n_dist
-        
-        draw.Line(n_px - 4, n_py + 5, n_px - 4, n_py - 5, Color3.new(1, 0.2, 0.2))
-        draw.Line(n_px - 4, n_py - 5, n_px + 4, n_py + 5, Color3.new(1, 0.2, 0.2))
-        draw.Line(n_px + 4, n_py + 5, n_px + 4, n_py - 5, Color3.new(1, 0.2, 0.2))
+    if rot_cam then
+        draw.Line(cx, cy, cx - 6, cy - 12, Color3.new(0.4, 0.98, 0.94))
+        draw.Line(cx, cy, cx + 6, cy - 12, Color3.new(0.4, 0.98, 0.94))
+        draw.Line(cx, cy, cx, cy - 12, Color3.new(0.4, 0.98, 0.94))
+    else
+        local scr_a = math.atan2(lv.Z, lv.X)
+        local tx = cx + math.cos(scr_a)*12
+        local ty = cy + math.sin(scr_a)*12
+        local w1x = cx + math.cos(scr_a - 0.4)*6
+        local w1y = cy + math.sin(scr_a - 0.4)*6
+        local w2x = cx + math.cos(scr_a + 0.4)*6
+        local w2y = cy + math.sin(scr_a + 0.4)*6
+        draw.Line(cx, cy, tx, ty, Color3.new(0.4, 0.98, 0.94))
+        draw.Line(tx, ty, w1x, w1y, Color3.new(0.4, 0.98, 0.94))
+        draw.Line(tx, ty, w2x, w2y, Color3.new(0.4, 0.98, 0.94))
+    end
+    
+    if s_cp and sty ~= 2 then
+        local dirs = {
+            {n="N", a=-math.pi/2}, {n="NE", a=-math.pi/4}, {n="E", a=0}, {n="SE", a=math.pi/4},
+            {n="S", a=math.pi/2}, {n="SW", a=3*math.pi/4}, {n="W", a=math.pi}, {n="NW", a=-3*math.pi/4}
+        }
+        for i=1, #dirs do
+            local d = dirs[i]
+            local scr_a = d.a
+            if rot_cam then scr_a = d.a + yaw end
+            
+            local c_dist
+            if sty == 0 then
+                local mx = math.max(math.abs(math.cos(scr_a)), math.abs(math.sin(scr_a)))
+                c_dist = (hsz / mx) + 12
+            else
+                c_dist = hsz + 12
+            end
+            
+            local px = cx + math.cos(scr_a) * c_dist
+            local py = cy + math.sin(scr_a) * c_dist
+            
+            local ok = pcall(draw.Text, px - 6, py - 6, d.n, Color3.new(0.8, 0.8, 0.8), 12)
+            if not ok then pcall(draw.Text, px - 6, py - 6, d.n) end
+        end
     end
     
     local act_tg = entity.GetTarget()
@@ -284,9 +345,15 @@ cheat.Register("onPaint", function()
             local b = p:GetBonePosition("HumanoidRootPart")
             if b and b.Magnitude > 0 then
                 local dx, dz = b.X - pos.X, b.Z - pos.Z
-                local sn, cs = math.sin(yaw), math.cos(yaw)
-                local px = cx + ((dx * cs - dz * sn) * sc)
-                local py = cy + ((dx * sn + dz * cs) * sc)
+                local dr_x, dr_z = dx, dz
+                
+                if rot_cam then
+                    dr_x = dx * cs - dz * sn
+                    dr_z = dx * sn + dz * cs
+                end
+                
+                local px = cx + (dr_x * sc)
+                local py = cy + (dr_z * sc)
                 
                 local draw_it = false
                 if sty == 0 or sty == 2 then
