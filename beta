@@ -1,3 +1,6 @@
+-- ==============================================================================
+-- 1. INITIALIZATION & GAME VERIFICATION
+-- ==============================================================================
 local OPERATION_ONE_PLACE_ID = 72920620366355
 
 if game.PlaceID ~= OPERATION_ONE_PLACE_ID then
@@ -48,6 +51,9 @@ cheat.register("shutdown", function()
     PVE_CACHE.ClosestMenu = nil
 end)
 
+-- ==============================================================================
+-- 2. GLOBAL VARIABLES & UTILITIES
+-- ==============================================================================
 local kUiTab = "Macro"
 local kUiMain = "Settings"        
 local kUiMisc = "Miscellaneous"   
@@ -169,6 +175,10 @@ local function DebugPrint(msg)
         print(msg)
     end
 end
+
+-- ==============================================================================
+-- 3. CONFIGURATION MANAGEMENT (SAVE/LOAD/SHARE)
+-- ==============================================================================
 
 local function UpdateConfigNames()
     for k in pairs(ConfigNames) do ConfigNames[k] = nil end
@@ -395,6 +405,10 @@ LoadFromFile()
 LoadWeaponLinks()
 LoadMasterSettings()
 
+-- ==============================================================================
+-- 4. GAME SPECIFIC LOGIC (WEAPON, AMMO & PVE CACHE)
+-- ==============================================================================
+
 local function GetCurrentOperationOneWeapon()
     if game.PlaceID ~= OPERATION_ONE_PLACE_ID then return nil, nil, nil end
     local viewmodels = game.Workspace:FindFirstChild("Viewmodels")
@@ -550,6 +564,10 @@ local function UpdatePVECache(forceUpdate)
     end
 end
 
+-- ==============================================================================
+-- 5. USER INTERFACE (MENU)
+-- ==============================================================================
+
 ui.newTab(kUiTab, kUiTab)
 
 ui.newContainer(kUiTab, kUiMain, "Macro Settings", { autosize = true, next = true })
@@ -696,6 +714,9 @@ end)
 
 ui.newCheckbox(kUiTab, kUiMisc, "Enable Keyframing")
 
+-- ==============================================================================
+-- 6. KEYFRAME EDITOR SYSTEM
+-- ==============================================================================
 local KeyframeCache = {}
 local isKeyframeEditorOpen = false
 local f5_was_pressed = false
@@ -762,8 +783,8 @@ local function GetOrCreateKFData(cfgName)
     if not KeyframeCache[cfgName] then
         KeyframeCache[cfgName] = {
             points = {
-                {x=0, y=0, hL={x=-5,y=0}, hR={x=5,y=0}}, 
-                {x=10, y=10, hL={x=5,y=10}, hR={x=15,y=10}}
+                {x=-80, y=-80, hL={x=-85,y=-80}, hR={x=-75,y=-80}}, 
+                {x=80, y=80, hL={x=75,y=80}, hR={x=85,y=80}}
             }, 
             count = 2, 
             smoothing = 0.5
@@ -777,21 +798,24 @@ local function SetKeyframeCount(cfgName, count)
     local data = GetOrCreateKFData(cfgName)
     if not data then return end
     count = math.max(2, math.min(20, count))
+    
     local new_points = {}
-    for i=1, count do
-        local t = (i-1)/(count-1)
-        local x = 0
-        local y = 0
+    for i = 1, count do
+        local t = (i - 1) / (count - 1)
+        local x = -80 + (160 * t)
+        local y = -80 + (160 * t)
+        
         if #data.points > 0 then
             local closest = data.points[1]
             for _, p in ipairs(data.points) do
                 if math.abs(p.x - x) < math.abs(closest.x - x) then closest = p end
             end
-            x = closest.x
             y = closest.y
         end
+        
         table.insert(new_points, {x = x, y = y, hL = {x = x - 5, y = y}, hR = {x = x + 5, y = y}})
     end
+    
     data.points = new_points
     data.count = count
     SaveKeyframes()
@@ -806,13 +830,18 @@ local function DrawSlider(x, y, w, label, min, max, val)
     local mx, my = mp[1], mp[2]
     local is_lmb = keyboard.IsPressed(1)
     
-    draw.TextOutlined(label, x, y - 15, Color3.new(1,1,1), "SmallestPixel", 255)
+    local display_val = tostring(math.floor(val + 0.5))
+    if label == "Smooth" then
+        display_val = string.format("%.2f", val)
+    end
+    
+    draw.TextOutlined(label .. ": " .. display_val, x, y - 15, Color3.new(1,1,1), "SmallestPixel", 255)
     draw.RectFilled(x, y, w, 5, Color3.new(0.2, 0.2, 0.2), 0, 255)
     
     local t = (val - min) / (max - min)
     local hx = x + (w * t)
     
-    if is_lmb and PointInRect(mx, my, x-5, y-5, w+10, 15) and not KF_DragPoint then
+    if is_lmb and PointInRect(mx, my, x - 5, y - 5, w + 10, 15) and not KF_DragPoint then
         KF_DragSlider = label
     end
     if not is_lmb then KF_DragSlider = nil end
@@ -1006,9 +1035,9 @@ local function DrawKeyframeEditor()
     end
 
     local cy2 = KF_Win2.y + 30
-    data.smoothing = DrawSlider(KF_Win2.x + 20, cy2, 160, "Smoothing (Tension)", 0, 1, data.smoothing or 0)
+    data.smoothing = DrawSlider(KF_Win2.x + 20, cy2, 160, "Smooth", 0, 1, data.smoothing or 0)
     cy2 = cy2 + 30
-    local new_count = DrawSlider(KF_Win2.x + 20, cy2, 160, "Keyframe Count", 2, 20, data.count or 2)
+    local new_count = DrawSlider(KF_Win2.x + 20, cy2, 160, "Keyframes", 2, 20, data.count or 2)
     cy2 = cy2 + 30
     
     if math.floor(new_count) ~= data.count then
@@ -1066,6 +1095,9 @@ local function DrawKeyframeEditor()
     end
 end
 
+-- ==============================================================================
+-- 7. DRAWING LOGIC (RECOIL GRAPH, FOV, DEBUG HUD & RECOIL LINE)
+-- ==============================================================================
 local function DrawDebugHUD()
     if not IsScriptActive then return end
     if not ui.getValue(kUiTab, kUiMisc, "Debug") then return end
@@ -1320,6 +1352,9 @@ local function OnPaintWrapper()
 end
 cheat.register("onPaint", OnPaintWrapper)
 
+-- ==============================================================================
+-- 8. ENGINE & LOGIC
+-- ==============================================================================
 local function IsMappedKeyPressed(dropIndex)
     local name = KeyNames[dropIndex + 1]
     if not name or name == "None" then return false end
