@@ -1,6 +1,3 @@
-Aqui está o script completo e modificado de acordo com sua documentação e exigências. O código foi adaptado para incluir o sistema de Keyframing sem quebrar a UI existente, utilizando a sintaxe correta da API do Serotonin (como `utility.GetMousePos()` retornando uma tabela de índices numéricos e `keyboard.IsPressed()` para as teclas).
-
-```lua
 -- ==============================================================================
 -- 1. INITIALIZATION & GAME VERIFICATION
 -- ==============================================================================
@@ -1648,4 +1645,3 @@ cheat.register("onUpdate", function()
     
     DebugState.Firing = isFiring
 end)
-```
