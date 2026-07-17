@@ -16,7 +16,7 @@ local MasterSettings = {
     AmmoCache = {} 
 }
 local AmmoInstancesCache = {} 
-local ProfilesCache = {}
+local PresetsCache = {}
 
 local DebugState = {
     Weapon = "None",
@@ -57,7 +57,7 @@ local FILE_PATH = "op1_recoil_configs.data"
 local LINKS_FILE_PATH = "op1_weapon_links.data"
 local MASTER_FILE_PATH = "master_settings_operationone.data"
 local KF_FILE_PATH = "op1_keyframes_cache.data"
-local PROFILE_FILE_PATH = "op1_profiles.data"
+local PRESET_FILE_PATH = "op1_presets.data"
 local RC4_KEY = "S3r0t0n1n_OpOne_M4cr0_2026!"
 
 local HttpService = game.GetService("HttpService")
@@ -774,6 +774,7 @@ ui.newButton(kUiTab, kUiMisc, "Set Default Config", function()
 end)
 
 ui.newCheckbox(kUiTab, kUiMisc, "Enable Keyframing")
+ui.newInputText(kUiTab, kUiMisc, "Preset Name", "")
 
 local KeyframeCache = {}
 local isKeyframeEditorOpen = false
@@ -785,34 +786,30 @@ local KF_ButtonLatch = false
 local TimelineStep = 0
 local CurrentRecX = 0
 local CurrentRecY = 0
-local ProfileNameInput = ""
-local ProfileScroll = 0
-local isInputActive = false
-local keyLatch = {}
 
 local KF_Win1 = {x = 300, y = 200, w = 500, h = 400, dragging = false, dx = 0, dy = 0}
 local KF_Win2 = {x = 820, y = 200, w = 200, h = 400, dragging = false, dx = 0, dy = 0}
 local KF_Win3 = {x = 300, y = 620, w = 720, h = 300, dragging = false, dx = 0, dy = 0}
 
-local function LoadProfiles()
-    local content = file.read(PROFILE_FILE_PATH)
-    if not content or content == "" then ProfilesCache = {} return end
+local function LoadPresets()
+    local content = file.read(PRESET_FILE_PATH)
+    if not content or content == "" then PresetsCache = {} return end
     local decrypted = DecryptData(content)
-    if not decrypted then ProfilesCache = {} return end
+    if not decrypted then PresetsCache = {} return end
     local success_json, data = pcall(JsonDecode, decrypted)
     if success_json and type(data) == "table" then
-        ProfilesCache = data
+        PresetsCache = data
     else
-        ProfilesCache = {}
+        PresetsCache = {}
     end
 end
 
-local function SaveProfiles()
-    local json_str = JsonEncode(ProfilesCache)
+local function SavePresets()
+    local json_str = JsonEncode(PresetsCache)
     local encrypted = EncryptData(json_str)
-    file.write(PROFILE_FILE_PATH, encrypted)
+    file.write(PRESET_FILE_PATH, encrypted)
 end
-LoadProfiles()
+LoadPresets()
 
 local function SaveKeyframes()
     local content = ""
@@ -1020,11 +1017,32 @@ local function DrawDiamondButton(x, y)
     local mp = utility.GetMousePos()
     local mx, my = mp[1], mp[2]
     local is_lmb = keyboard.IsPressed(1)
-    local hovered = math.abs(mx - (x+10)) < 12 and math.abs(my - (y+10)) < 12
+    local cx, cy = x + 10, y + 10
+    local hovered = math.abs(mx - cx) < 10 and math.abs(my - cy) < 10
     local color = hovered and Color3.new(0.3, 0.6, 0.3) or Color3.new(0.8, 0.8, 0.8)
     
-    draw.CircleFilled(x + 10, y + 10, 8, color, 4, 255)
-    draw.Circle(x + 10, y + 10, 8, Color3.new(0, 0.8, 0.5), 1, 4, 255)
+    draw.Line(cx, cy - 6, cx + 6, cy, color, 2, 255)
+    draw.Line(cx + 6, cy, cx, cy + 6, color, 2, 255)
+    draw.Line(cx, cy + 6, cx - 6, cy, color, 2, 255)
+    draw.Line(cx - 6, cy, cx, cy - 6, color, 2, 255)
+    
+    if hovered and is_lmb and not KF_ButtonLatch and not KF_DragPoint and not KF_DragSlider then
+        KF_ButtonLatch = true
+        return true
+    end
+    if not is_lmb then KF_ButtonLatch = false end
+    return false
+end
+
+local function DrawSmallButton(x, y, w, h, label)
+    local mp = utility.GetMousePos()
+    local mx, my = mp[1], mp[2]
+    local is_lmb = keyboard.IsPressed(1)
+    local hovered = PointInRect(mx, my, x, y, w, h)
+    local color = hovered and Color3.new(0.3, 0.6, 0.3) or Color3.new(0.2, 0.2, 0.2)
+    draw.RectFilled(x, y, w, h, color, 0, 255)
+    draw.Rect(x, y, w, h, Color3.new(0, 0.8, 0.5), 1, 0, 255)
+    draw.TextOutlined(label, x + 4, y + 3, Color3.new(1,1,1), "SmallestPixel", 255)
     
     if hovered and is_lmb and not KF_ButtonLatch and not KF_DragPoint and not KF_DragSlider then
         KF_ButtonLatch = true
@@ -1096,7 +1114,7 @@ local function DrawKeyframeEditor()
 
     DrawWindow(KF_Win1, "Spline Editor - " .. cfgName)
     DrawWindow(KF_Win2, "Spline & Smoothing Controls")
-    DrawWindow(KF_Win3, "Macro Builder & Profile Manager")
+    DrawWindow(KF_Win3, "Preset Manager & Recoil Values")
 
     local gx, gy, gw, gh = KF_Win1.x + 20, KF_Win1.y + 40, KF_Win1.w - 40, KF_Win1.h - 60
     draw.RectFilled(gx, gy, gw, gh, Color3.new(0.05, 0.05, 0.05), 0, 255)
@@ -1142,8 +1160,23 @@ local function DrawKeyframeEditor()
         end
     end
 
-    local tl_x, _ = G2S(TimelineStep, 0)
+    local tl_x = gx + (TimelineStep * gw)
+    
+    if is_lmb and PointInRect(mx, my, tl_x - 8, gy - 25, 16, 25) and not KF_DragPoint and KF_DragSlider == nil then
+        KF_DragSlider = "TimelinePlayhead"
+    end
+    if not is_lmb and KF_DragSlider == "TimelinePlayhead" then
+        KF_DragSlider = nil
+    end
+    if KF_DragSlider == "TimelinePlayhead" then
+        TimelineStep = math.max(0, math.min(1, (mx - gx) / gw))
+        tl_x = gx + (TimelineStep * gw)
+    end
+
     draw.Line(tl_x, gy, tl_x, gy + gh, Color3.new(1, 0, 0), 1, 200)
+    draw.Line(tl_x, gy - 5, tl_x - 5, gy - 15, Color3.new(1, 0, 0), 2, 255)
+    draw.Line(tl_x, gy - 5, tl_x + 5, gy - 15, Color3.new(1, 0, 0), 2, 255)
+    draw.Line(tl_x - 5, gy - 15, tl_x + 5, gy - 15, Color3.new(1, 0, 0), 2, 255)
 
     local clicked_this_frame = false
     if is_lmb and not KF_DragSlider and PointInRect(mx, my, gx-10, gy-10, gw+20, gh+20) then
@@ -1273,8 +1306,13 @@ local function DrawKeyframeEditor()
     end
 
     local cy3 = KF_Win3.y + 30
+    local presetName = ui.getValue(kUiTab, kUiMisc, "Preset Name") or ""
 
-    if TimelineStep <= 0.01 then
+    if #SelectedKFPoints == 1 then
+        local p = data.points[SelectedKFPoints[1]]
+        CurrentRecX = p.recX or 0
+        CurrentRecY = p.recY or 0
+    elseif TimelineStep <= 0.01 then
         CurrentRecX = ui.getValue(kUiTab, kUiMain, "Recoil X")
         CurrentRecY = ui.getValue(kUiTab, kUiMain, "Recoil Y")
     elseif not (KF_DragSlider == "Recoil Control X" or KF_DragSlider == "Recoil Control Y") then
@@ -1282,110 +1320,92 @@ local function DrawKeyframeEditor()
     end
 
     CurrentRecX = DrawSlider(KF_Win3.x + 20, cy3, 200, "Recoil Control X", -80, 80, CurrentRecX)
-    if KF_DragSlider == "Recoil Control X" and TimelineStep <= 0.01 then
-        ui.setValue(kUiTab, kUiMain, "Recoil X", CurrentRecX)
-        data.points[1].recX = CurrentRecX
-        SaveKeyframes()
+    if KF_DragSlider == "Recoil Control X" then
+        if #SelectedKFPoints == 1 then
+            local p = data.points[SelectedKFPoints[1]]
+            p.recX = CurrentRecX
+            if SelectedKFPoints[1] == 1 then
+                ui.setValue(kUiTab, kUiMain, "Recoil X", CurrentRecX)
+            end
+            SaveKeyframes()
+        elseif TimelineStep <= 0.01 then
+            ui.setValue(kUiTab, kUiMain, "Recoil X", CurrentRecX)
+            data.points[1].recX = CurrentRecX
+            SaveKeyframes()
+        end
     end
     if DrawDiamondButton(KF_Win3.x + 230, cy3 - 5) then
         AddKeyframeAtTimeline(TimelineStep, CurrentRecX, CurrentRecY)
     end
     cy3 = cy3 + 30
+    
     CurrentRecY = DrawSlider(KF_Win3.x + 20, cy3, 200, "Recoil Control Y", -80, 80, CurrentRecY)
-    if KF_DragSlider == "Recoil Control Y" and TimelineStep <= 0.01 then
-        ui.setValue(kUiTab, kUiMain, "Recoil Y", CurrentRecY)
-        data.points[1].recY = CurrentRecY
-        SaveKeyframes()
+    if KF_DragSlider == "Recoil Control Y" then
+        if #SelectedKFPoints == 1 then
+            local p = data.points[SelectedKFPoints[1]]
+            p.recY = CurrentRecY
+            if SelectedKFPoints[1] == 1 then
+                ui.setValue(kUiTab, kUiMain, "Recoil Y", CurrentRecY)
+            end
+            SaveKeyframes()
+        elseif TimelineStep <= 0.01 then
+            ui.setValue(kUiTab, kUiMain, "Recoil Y", CurrentRecY)
+            data.points[1].recY = CurrentRecY
+            SaveKeyframes()
+        end
     end
     if DrawDiamondButton(KF_Win3.x + 230, cy3 - 5) then
         AddKeyframeAtTimeline(TimelineStep, CurrentRecX, CurrentRecY)
     end
 
     cy3 = cy3 + 35
-    draw.TextOutlined("Profile Name:", KF_Win3.x + 20, cy3, Color3.new(1,1,1), "SmallestPixel", 255)
-    local input_box = {x = KF_Win3.x + 120, y = cy3 - 5, w = 200, h = 20}
-    
-    if is_lmb and PointInRect(mx, my, input_box.x, input_box.y, input_box.w, input_box.h) and not KF_DragPoint and not KF_DragSlider then
-        isInputActive = true
-    elseif is_lmb and not PointInRect(mx, my, input_box.x, input_box.y, input_box.w, input_box.h) then
-        isInputActive = false
-    end
-
-    draw.RectFilled(input_box.x, input_box.y, input_box.w, input_box.h, isInputActive and Color3.new(0.2, 0.2, 0.3) or Color3.new(0.1, 0.1, 0.1), 0, 255)
-    draw.Rect(input_box.x, input_box.y, input_box.w, input_box.h, isInputActive and Color3.new(0, 1, 1) or Color3.new(0.3, 0.3, 0.3), 1, 0, 255)
-    draw.TextOutlined(ProfileNameInput, input_box.x + 5, input_box.y + 3, Color3.new(1,1,1), "SmallestPixel", 255)
-    
-    if isInputActive then
-        for i = 65, 90 do
-            if keyboard.IsPressed(i) and not keyLatch[i] then
-                keyLatch[i] = true
-                ProfileNameInput = ProfileNameInput .. string.char(i)
-            elseif not keyboard.IsPressed(i) then
-                keyLatch[i] = false
-            end
-        end
-        for i = 48, 57 do
-            if keyboard.IsPressed(i) and not keyLatch[i] then
-                keyLatch[i] = true
-                ProfileNameInput = ProfileNameInput .. string.char(i)
-            elseif not keyboard.IsPressed(i) then
-                keyLatch[i] = false
-            end
-        end
-        if keyboard.IsPressed(8) and not keyLatch[8] then
-            keyLatch[8] = true
-            ProfileNameInput = ProfileNameInput:sub(1, -2)
-        elseif not keyboard.IsPressed(8) then
-            keyLatch[8] = false
-        end
-    end
-    
-    if DrawButton(KF_Win3.x + 330, cy3 - 5, 60, 20, "Save Prf") then
-        if ProfileNameInput and ProfileNameInput ~= "" then
-            local data_to_save = GetOrCreateKFData(cfgName)
-            if data_to_save then
-                ProfilesCache[ProfileNameInput] = DeepCopyTable(data_to_save)
-                SaveProfiles()
-            end
+    draw.TextOutlined("Preset Name: " .. presetName, KF_Win3.x + 20, cy3, Color3.new(1,1,1), "SmallestPixel", 255)
+    if DrawButton(KF_Win3.x + 250, cy3 - 5, 100, 20, "Create Preset") then
+        if presetName and presetName ~= "" then
+            PresetsCache[presetName] = {
+                points = DeepCopyTable(data.points),
+                count = data.count,
+                smoothing = data.smoothing
+            }
+            SavePresets()
         end
     end
 
-    cy3 = cy3 + 35
-    draw.TextOutlined("Saved Profiles:", KF_Win3.x + 20, cy3, Color3.new(1,1,1), "SmallestPixel", 255)
-    cy3 = cy3 + 15
+    cy3 = cy3 + 25
+    draw.TextOutlined("Saved Presets:", KF_Win3.x + 20, cy3, Color3.new(1,1,1), "SmallestPixel", 255)
+    cy3 = cy3 + 10
     
     local prof_y = cy3
-    local profile_names = {}
-    for name, _ in pairs(ProfilesCache) do table.insert(profile_names, name) end
-    table.sort(profile_names)
+    local preset_names = {}
+    for name, _ in pairs(PresetsCache) do table.insert(preset_names, name) end
+    table.sort(preset_names)
     
-    local max_visible = 5
-    for i = 1, #profile_names do
-        local idx = i + ProfileScroll
-        if idx > #profile_names or idx < 1 then break end
-        if i > max_visible then break end
+    for i = 1, #preset_names do
+        local name = preset_names[i]
+        if prof_y > KF_Win3.y + KF_Win3.h - 30 then break end
         
-        local name = profile_names[idx]
         draw.RectFilled(KF_Win3.x + 20, prof_y, KF_Win3.w - 40, 25, Color3.new(0.1, 0.1, 0.1), 0, 200)
-        draw.TextOutlined(name, KF_Win3.x + 25, prof_y + 5, Color3.new(1,1,1), "SmallestPixel", 255)
         
-        if DrawButton(KF_Win3.x + KF_Win3.w - 105, prof_y + 2, 20, 20, "S") then
-            local data_to_save = GetOrCreateKFData(cfgName)
-            if data_to_save then
-                ProfilesCache[name] = DeepCopyTable(data_to_save)
-                SaveProfiles()
-            end
+        if DrawSmallButton(KF_Win3.x + 25, prof_y + 2, 20, 20, "S") then
+            PresetsCache[name] = {
+                points = DeepCopyTable(data.points),
+                count = data.count,
+                smoothing = data.smoothing
+            }
+            SavePresets()
         end
-        if DrawButton(KF_Win3.x + KF_Win3.w - 80, prof_y + 2, 20, 20, "E") then
-            if ProfilesCache[name] then
-                KeyframeCache[cfgName] = DeepCopyTable(ProfilesCache[name])
+        if DrawSmallButton(KF_Win3.x + 50, prof_y + 2, 20, 20, "E") then
+            if PresetsCache[name] then
+                KeyframeCache[cfgName] = DeepCopyTable(PresetsCache[name])
                 SaveKeyframes()
             end
         end
-        if DrawButton(KF_Win3.x + KF_Win3.w - 55, prof_y + 2, 20, 20, "D") then
-            ProfilesCache[name] = nil
-            SaveProfiles()
+        if DrawSmallButton(KF_Win3.x + 75, prof_y + 2, 20, 20, "D") then
+            PresetsCache[name] = nil
+            SavePresets()
         end
+        
+        draw.TextOutlined(name, KF_Win3.x + 105, prof_y + 5, Color3.new(1,1,1), "SmallestPixel", 255)
         prof_y = prof_y + 30
     end
 end
