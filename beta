@@ -1,11 +1,13 @@
+Aqui está o script completo e modificado de acordo com sua documentação e exigências. O código foi adaptado para incluir o sistema de Keyframing sem quebrar a UI existente, utilizando a sintaxe correta da API do Serotonin (como `utility.GetMousePos()` retornando uma tabela de índices numéricos e `keyboard.IsPressed()` para as teclas).
+
+```lua
 -- ==============================================================================
 -- 1. INITIALIZATION & GAME VERIFICATION
 -- ==============================================================================
--- Change this to a specific PlaceID to restrict the macro. 0 = Works everywhere.
-local TARGET_PLACE_ID = 0
+local OPERATION_ONE_PLACE_ID = 72920620366355
 
-if TARGET_PLACE_ID ~= 0 and game.PlaceID ~= TARGET_PLACE_ID then
-    print("[Universal Macro] Invalid game detected! Script halted.")
+if game.PlaceID ~= OPERATION_ONE_PLACE_ID then
+    print("[OpOne Macro] Invalid game detected! This script only works on the game: Operation One")
     return
 end
 
@@ -13,10 +15,19 @@ local IsScriptActive = true
 
 local AllConfigs = {}
 local ConfigNames = {} 
+local WeaponLinks = {}
+local MasterSettings = { 
+    UseDefaultConfig = false, 
+    DefaultConfigName = "",
+    AmmoCache = {} 
+}
+local AmmoInstancesCache = {} 
 
 local DebugState = {
     Weapon = "None",
     Config = "None",
+    LinkedTools = "None",
+    AmmoInfo = "N/A",
     Firing = false,
     ToolValid = false,
     TargetFOV = false,
@@ -28,17 +39,20 @@ local DebugState = {
     SprayPath = {}
 }
 
--- Global dynamic cache to store LocalPlayer data safely
-local GlobalCache = {
-    LocalPlayerIndex = nil,
-    LocalCharacter = nil
+-- PVE Cache structure for WarehouseMenu targets
+local PVE_CACHE = {
+    LastUpdate = 0,
+    ClosestMenu = nil
 }
 
 cheat.register("shutdown", function()
     IsScriptActive = false
     AllConfigs = {}
     ConfigNames = {}
-    GlobalCache = {}
+    WeaponLinks = {}
+    MasterSettings = {}
+    AmmoInstancesCache = {}
+    PVE_CACHE.ClosestMenu = nil
 end)
 
 -- ==============================================================================
@@ -47,18 +61,21 @@ end)
 local kUiTab = "Macro"
 local kUiMain = "Settings"        
 local kUiMisc = "Miscellaneous"   
-local kUiMagnet = "Magnet Recoil"
 
--- Dedicated Tab for Keyframing
-local kUiTabKF = "Keyframes"
-local kUiKFMain = "Keyframe Control"
-local kUiKFPoints = "Keyframe Points"
-
-local FILE_PATH = "universal_recoil_configs.data"
+local FILE_PATH = "op1_recoil_configs.data"
+local LINKS_FILE_PATH = "op1_weapon_links.data"
+local MASTER_FILE_PATH = "master_settings_operationone.data"
+local KF_FILE_PATH = "op1_keyframes_cache.data"
 
 local lastTick = 0
 local sprayStartTime = 0
+local lastScanTime = 0
 local isFiring = false
+local hasDetectedGame = false
+local lastDetectedWeapon = nil
+local lastDetectedWeaponInstance = nil
+local lastConfigDropdownIndex = -1 
+local lastDetectedSlot = nil
 
 local moveAccumulatorX = 0
 local moveAccumulatorY = 0
@@ -68,10 +85,6 @@ local lastInputState = false
 local isDraggingGraph = false 
 local dragOffsetX = 0
 local dragOffsetY = 0
-
-local isDraggingTimeline = false
-local tlDragOffsetX = 0
-local tlDragOffsetY = 0
 
 local ScreenSize = { w = 0, h = 0 }
 local function updateScreenSize()
@@ -159,51 +172,6 @@ local function GetBlendedEasing(t, easeIdx1, easeIdx2)
     end
 end
 
-local function clamp(val, min, max)
-    return math.max(min, math.min(max, val))
-end
-
--- Advanced Mathematical Interpolation Function (DaVinci / AE Style)
-local function GetKeyframeAlpha(alpha, interpMode, tension)
-    alpha = clamp(alpha, 0, 1)
-    
-    if interpMode == 1 then -- Bezier Curve (Smooth S-Curve)
-        if alpha <= 0 then return 0 end
-        if alpha >= 1 then return 1 end
-        return math.pow(alpha, tension) / (math.pow(alpha, tension) + math.pow(1 - alpha, tension))
-    elseif interpMode == 2 then -- Hold
-        return (alpha >= 1.0) and 1.0 or 0.0
-    elseif interpMode == 3 then -- Ease In
-        return math.pow(alpha, tension)
-    elseif interpMode == 4 then -- Ease Out
-        return 1.0 - math.pow(1.0 - alpha, tension)
-    elseif interpMode == 5 then -- Ease In-Out
-        if alpha < 0.5 then
-            return 0.5 * math.pow(2 * alpha, tension)
-        else
-            return 1.0 - 0.5 * math.pow(2 * (1 - alpha), tension)
-        end
-    elseif interpMode == 6 then -- Bounce (Out Back)
-        local c1 = 1.70158
-        local c3 = c1 + 1
-        return 1 + c3 * math.pow(alpha - 1, 3) + c1 * math.pow(alpha - 1, 2)
-    else -- Linear (0)
-        return alpha
-    end
-end
-
-local function SafeGetColor3(tab, container, name, defaultR, defaultG, defaultB)
-    local s, val = pcall(ui.getValue, tab, container, name)
-    if s and val then
-        if type(val) == "userdata" then
-            -- Serotonin returns Color3 object
-            return val
-        end
-    end
-    -- Fallback
-    return Color3.new(defaultR/255, defaultG/255, defaultB/255)
-end
-
 local function DebugPrint(msg)
     local s1, debugEnabled = pcall(ui.getValue, kUiTab, kUiMisc, "Debug")
     local s2, consoleMsgs = pcall(ui.getValue, kUiTab, kUiMisc, "Console Messages")
@@ -240,7 +208,7 @@ local function LoadConfigData(name)
     ui.setValue(kUiTab, kUiMain, "Trigger Key 2", tonumber(d.act_key2) or 0)
     ui.setValue(kUiTab, kUiMain, "Combo Logic", tonumber(d.act_logic) or 0)
     ui.setValue(kUiTab, kUiMain, "Activation Mode", tonumber(d.act_mode) or 0)
-    ui.setValue(kUiTab, kUiMain, "Recoil X (Base)", tonumber(d.recoil_x) or 0)
+    ui.setValue(kUiTab, kUiMain, "Recoil X", tonumber(d.recoil_x) or 0)
     ui.setValue(kUiTab, kUiMain, "Recoil Y", tonumber(d.recoil_y) or 0)
     ui.setValue(kUiTab, kUiMain, "Delay (ms)", tonumber(d.delay) or 10)
     ui.setValue(kUiTab, kUiMain, "Smoothness", tonumber(d.smooth) or 1)
@@ -248,39 +216,13 @@ local function LoadConfigData(name)
     ui.setValue(kUiTab, kUiMain, "Precision Mode (1/10)", d.weak_mode == true)
     
     ui.setValue(kUiTab, kUiMisc, "Tool Check", d.tool_check == true)
+    ui.setValue(kUiTab, kUiMisc, "Unloaded Ammo Check", d.ammo_check == true)
     
     local eTime = tonumber(d.easing_time) or tonumber(d.ramp_time) or 1000
     ui.setValue(kUiTab, kUiMain, "Easing Time (ms)", eTime)
     
     ui.setValue(kUiTab, kUiMisc, "Target Check (FOV)", d.target_check == true)
     ui.setValue(kUiTab, kUiMisc, "Target FOV", tonumber(d.target_fov) or 100)
-    ui.setValue(kUiTab, kUiMisc, "Visualize FOV", d.visualize_fov == true)
-    
-    -- Magnet Load
-    ui.setValue(kUiTab, kUiMagnet, "Enable Magnet Recoil", d.magnet_enable == true)
-    ui.setValue(kUiTab, kUiMagnet, "Aim Part", tonumber(d.magnet_part) or 0)
-    ui.setValue(kUiTab, kUiMagnet, "Visualize Magnet FOV", d.visualize_magnet_fov == true)
-    ui.setValue(kUiTab, kUiMagnet, "Magnet FOV", tonumber(d.magnet_fov) or 100)
-    ui.setValue(kUiTab, kUiMagnet, "Magnet Strength", tonumber(d.magnet_strength) or 10)
-    ui.setValue(kUiTab, kUiMagnet, "Magnet Smoothness", tonumber(d.magnet_smooth) or 10)
-    
-    -- Keyframe Load
-    ui.setValue(kUiTabKF, kUiKFMain, "Enable Keyframing", d.kf_enable == true)
-    ui.setValue(kUiTabKF, kUiKFMain, "Visualize Keyframe Nodes", d.visualize_kf_nodes == true)
-    ui.setValue(kUiTabKF, kUiKFMain, "Show Timeline Graph", d.kf_show_graph == true)
-    ui.setValue(kUiTabKF, kUiKFMain, "Graph Pos X", tonumber(d.kf_gx) or 600)
-    ui.setValue(kUiTabKF, kUiKFMain, "Graph Pos Y", tonumber(d.kf_gy) or 300)
-    ui.setValue(kUiTabKF, kUiKFMain, "Master Scale X (%)", tonumber(d.kf_scale_x) or 100)
-    ui.setValue(kUiTabKF, kUiKFMain, "Master Scale Y (%)", tonumber(d.kf_scale_y) or 100)
-    ui.setValue(kUiTabKF, kUiKFMain, "Active Keyframes", tonumber(d.kf_count) or 3)
-    
-    for i = 1, 10 do
-        ui.setValue(kUiTabKF, kUiKFPoints, "KF"..i.." Time (ms)", tonumber(d["kf"..i.."_t"]) or (i * 200))
-        ui.setValue(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil X", tonumber(d["kf"..i.."_x"]) or 0)
-        ui.setValue(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil Y", tonumber(d["kf"..i.."_y"]) or 0)
-        ui.setValue(kUiTabKF, kUiKFPoints, "KF"..i.." Curve Type", tonumber(d["kf"..i.."_i"]) or 0)
-        ui.setValue(kUiTabKF, kUiKFPoints, "KF"..i.." Tension", tonumber(d["kf"..i.."_ten"]) or 20)
-    end
     
     local savedEase = d.easing_type or "Constant"
     local foundIdx = 0
@@ -296,6 +238,7 @@ local function LoadConfigData(name)
     for i, v in ipairs(ConfigNames) do if v == name then cfgIdx = i - 1; break end end
     ui.setValue(kUiTab, kUiMisc, "Select Config", cfgIdx)
     ui.setValue(kUiTab, kUiMisc, "Config Name", name)
+    lastConfigDropdownIndex = cfgIdx
     
     DebugState.Config = name
 end
@@ -319,33 +262,9 @@ local function SaveToFile()
         content = content .. '  easing_type_2: "' .. tostring(data.easing_type_2) .. '"\n'
         content = content .. '  easing_time: "' .. tostring(data.easing_time) .. '"\n'
         content = content .. '  tool_check: "' .. tostring(data.tool_check) .. '"\n'
+        content = content .. '  ammo_check: "' .. tostring(data.ammo_check) .. '"\n'
         content = content .. '  target_check: "' .. tostring(data.target_check) .. '"\n'
         content = content .. '  target_fov: "' .. tostring(data.target_fov) .. '"\n'
-        content = content .. '  visualize_fov: "' .. tostring(data.visualize_fov) .. '"\n'
-        content = content .. '  magnet_enable: "' .. tostring(data.magnet_enable) .. '"\n'
-        content = content .. '  magnet_part: "' .. tostring(data.magnet_part) .. '"\n'
-        content = content .. '  visualize_magnet_fov: "' .. tostring(data.visualize_magnet_fov) .. '"\n'
-        content = content .. '  magnet_fov: "' .. tostring(data.magnet_fov) .. '"\n'
-        content = content .. '  magnet_strength: "' .. tostring(data.magnet_strength) .. '"\n'
-        content = content .. '  magnet_smooth: "' .. tostring(data.magnet_smooth) .. '"\n'
-        
-        -- Keyframes Save Data
-        content = content .. '  kf_enable: "' .. tostring(data.kf_enable) .. '"\n'
-        content = content .. '  visualize_kf_nodes: "' .. tostring(data.visualize_kf_nodes) .. '"\n'
-        content = content .. '  kf_show_graph: "' .. tostring(data.kf_show_graph) .. '"\n'
-        content = content .. '  kf_gx: "' .. tostring(data.kf_gx) .. '"\n'
-        content = content .. '  kf_gy: "' .. tostring(data.kf_gy) .. '"\n'
-        content = content .. '  kf_scale_x: "' .. tostring(data.kf_scale_x) .. '"\n'
-        content = content .. '  kf_scale_y: "' .. tostring(data.kf_scale_y) .. '"\n'
-        content = content .. '  kf_count: "' .. tostring(data.kf_count) .. '"\n'
-        for i = 1, 10 do
-            content = content .. '  kf'..i..'_t: "' .. tostring(data["kf"..i.."_t"]) .. '"\n'
-            content = content .. '  kf'..i..'_x: "' .. tostring(data["kf"..i.."_x"]) .. '"\n'
-            content = content .. '  kf'..i..'_y: "' .. tostring(data["kf"..i.."_y"]) .. '"\n'
-            content = content .. '  kf'..i..'_i: "' .. tostring(data["kf"..i.."_i"]) .. '"\n'
-            content = content .. '  kf'..i..'_ten: "' .. tostring(data["kf"..i.."_ten"]) .. '"\n'
-        end
-        
         content = content .. "}\n\n"
     end
     file.write(FILE_PATH, content)
@@ -377,6 +296,54 @@ local function LoadFromFile()
         end
     end
     UpdateConfigNames()
+end
+
+local function SaveWeaponLinks()
+    local content = ""
+    for weapon, config in pairs(WeaponLinks) do
+        content = content .. weapon .. "=" .. config .. "\n"
+    end
+    file.write(LINKS_FILE_PATH, content)
+end
+
+local function LoadWeaponLinks()
+    local content = file.read(LINKS_FILE_PATH)
+    WeaponLinks = {}
+    if not content or content == "" then return end
+    for line in string.gmatch(content, "[^\r\n]+") do
+        local w, c = string.match(line, "^(.-)=(.-)$")
+        if w and c then WeaponLinks[w] = c end
+    end
+end
+
+local function SaveMasterSettings()
+    local content = ""
+    content = content .. "UseDefaultConfig=" .. tostring(MasterSettings.UseDefaultConfig) .. "\n"
+    content = content .. "DefaultConfigName=" .. tostring(MasterSettings.DefaultConfigName) .. "\n"
+    content = content .. "[AmmoCache]\n"
+    for wpn, addr in pairs(MasterSettings.AmmoCache) do
+        content = content .. wpn .. "=" .. tostring(addr) .. "\n"
+    end
+    file.write(MASTER_FILE_PATH, content)
+end
+
+local function LoadMasterSettings()
+    local content = file.read(MASTER_FILE_PATH)
+    if not content or content == "" then return end
+    MasterSettings.AmmoCache = {}
+    local parsingCache = false
+    for line in string.gmatch(content, "[^\r\n]+") do
+        if line == "[AmmoCache]" then 
+            parsingCache = true
+        elseif parsingCache then
+            local w, a = string.match(line, "^(.-)=(.-)$")
+            if w and a then MasterSettings.AmmoCache[w] = a end
+        else
+            local k, v = string.match(line, "^(.-)=(.-)$")
+            if k == "UseDefaultConfig" then MasterSettings.UseDefaultConfig = (v == "true")
+            elseif k == "DefaultConfigName" then MasterSettings.DefaultConfigName = v end
+        end
+    end
 end
 
 local b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -415,7 +382,7 @@ local function SerializeConfig(cfgName, cfg)
     for k, v in pairs(cfg) do
         table.insert(parts, tostring(k) .. "=" .. tostring(v))
     end
-    local rawStr = "[UniversalRC]" .. table.concat(parts, ";")
+    local rawStr = "[OpOne]" .. table.concat(parts, ";")
     return base64_encode(rawStr)
 end
 
@@ -423,10 +390,10 @@ local function DeserializeConfig(encodedStr)
     if not encodedStr or type(encodedStr) ~= "string" then return nil end
     
     local success, decodedStr = pcall(base64_decode, encodedStr)
-    if not success or not decodedStr or string.sub(decodedStr, 1, 13) ~= "[UniversalRC]" then return nil end
+    if not success or not decodedStr or string.sub(decodedStr, 1, 7) ~= "[OpOne]" then return nil end
     
     local cfg = {}
-    local dataStr = string.sub(decodedStr, 14)
+    local dataStr = string.sub(decodedStr, 8)
     for k, v in string.gmatch(dataStr, "([^=;]+)=([^=;]+)") do
         if v == "true" then cfg[k] = true
         elseif v == "false" then cfg[k] = false
@@ -439,24 +406,177 @@ local function DeserializeConfig(encodedStr)
 end
 
 LoadFromFile()
+LoadWeaponLinks()
+LoadMasterSettings()
 
 -- ==============================================================================
--- 4. USER INTERFACE (MENU)
+-- 4. GAME SPECIFIC LOGIC (WEAPON, AMMO & PVE CACHE)
+-- ==============================================================================
+
+local function GetCurrentOperationOneWeapon()
+    if game.PlaceID ~= OPERATION_ONE_PLACE_ID then return nil, nil, nil end
+    local viewmodels = game.Workspace:FindFirstChild("Viewmodels")
+    local localViewmodel = viewmodels and viewmodels:FindFirstChild("LocalViewmodel")
+    
+    if localViewmodel then
+        local children = localViewmodel:GetChildren()
+        for i = 1, #children do
+            local item = children[i]
+            if item.ClassName == "Model" then
+                local keyAttr = item:GetAttribute("key")
+                if keyAttr and type(keyAttr.Value) == "string" then
+                    if keyAttr.Value == "primary" or keyAttr.Value == "secondary" then
+                        return item, item.Name, keyAttr.Value 
+                    end
+                end
+            end
+        end
+    end
+    return nil, nil, nil
+end
+
+local function ScanAmmoLabels()
+    local currentTick = utility.GetTickCount()
+    if currentTick - lastScanTime < 1000 then return end 
+    lastScanTime = currentTick
+
+    local lp = game.LocalPlayer
+    if not lp then return end
+    
+    local pGui = lp:FindFirstChild("PlayerGui")
+    if not pGui then return end
+    
+    local gameGui = pGui:FindFirstChild("Game")
+    local right = gameGui and gameGui:FindFirstChild("Right")
+    local bottom = right and right:FindFirstChild("Bottom")
+    local backpack = bottom and bottom:FindFirstChild("BackpackItems")
+    
+    if not backpack then return end
+
+    local updatedCache = false
+    
+    for _, itemFrame in ipairs(backpack:GetChildren()) do
+        if itemFrame.Name == "Item" then
+            
+            local folder = itemFrame:FindFirstChild("Folder")
+            local actionsList = folder and folder:FindFirstChild("ActionsList")
+            local key = actionsList and actionsList:FindFirstChild("Key")
+            
+            local isWeaponSlot = nil
+            
+            if key then
+                if key:FindFirstChild("Enum.KeyCode.One") then
+                    isWeaponSlot = "primary"
+                elseif key:FindFirstChild("Enum.KeyCode.Two") then
+                    isWeaponSlot = "secondary"
+                end
+            end
+            
+            if isWeaponSlot then
+                local itemObjVal = itemFrame:FindFirstChild("Item")
+                local infoLabel = itemFrame:FindFirstChild("InfoLabel")
+                
+                if itemObjVal and infoLabel then
+                    local wInst = itemObjVal.Value
+                    if wInst and wInst.Name then
+                        local wName = wInst.Name
+                        
+                        AmmoInstancesCache[wName] = infoLabel 
+                        AmmoInstancesCache[isWeaponSlot] = infoLabel 
+                        
+                        local addrStr = tostring(infoLabel.Address or "0")
+                        if MasterSettings.AmmoCache[wName] ~= addrStr then
+                            MasterSettings.AmmoCache[wName] = addrStr
+                            updatedCache = true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    if updatedCache then SaveMasterSettings() end
+end
+
+local function GetWeaponAmmo(weaponName, slotName)
+    local label = AmmoInstancesCache[weaponName] or AmmoInstancesCache[slotName]
+    if not label then return true, "N/A" end 
+    
+    local success, text = pcall(function() return label.Text end)
+    if not success or type(text) ~= "string" then
+        success, text = pcall(function() return label.Value end)
+    end
+    
+    if success and type(text) == "string" then
+        local currentAmmoStr = string.match(text, "^%s*(%d+)%s*/")
+        if currentAmmoStr then
+            local currentAmmo = tonumber(currentAmmoStr)
+            return (currentAmmo > 0), text
+        end
+    end
+    return true, "Err"
+end
+
+-- Dynamically finds and caches the nearest WarehouseMenu
+local function UpdatePVECache(forceUpdate)
+    local currentTick = utility.GetTickCount()
+    if not forceUpdate and (currentTick - PVE_CACHE.LastUpdate < 2000) then return end
+    PVE_CACHE.LastUpdate = currentTick
+
+    local lp = game.LocalPlayer
+    local char = lp and lp.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    
+    local myPos = root.Position
+    local closestMenu = nil
+    local closestDist = math.huge
+
+    local workspaceChildren = game.Workspace:GetChildren()
+    for i = 1, #workspaceChildren do
+        local child = workspaceChildren[i]
+        if child.Name == "WarehouseMenu" and child.ClassName == "Model" then
+            
+            local refPart = child:FindFirstChildOfClass("UnionOperation") or child:FindFirstChildOfClass("BasePart")
+            if not refPart then
+                local firstTarget = child:FindFirstChild("Target")
+                if firstTarget then
+                    refPart = firstTarget:FindFirstChildOfClass("UnionOperation") or firstTarget:FindFirstChildOfClass("BasePart")
+                end
+            end
+
+            if refPart then
+                local rPos = refPart.Position
+                local dist = math.sqrt((rPos.X - myPos.X)^2 + (rPos.Y - myPos.Y)^2 + (rPos.Z - myPos.Z)^2)
+                if dist < closestDist then
+                    closestDist = dist
+                    closestMenu = child
+                end
+            end
+        end
+    end
+
+    if closestMenu and closestDist < 500 then
+        PVE_CACHE.ClosestMenu = closestMenu
+    else
+        PVE_CACHE.ClosestMenu = nil
+    end
+end
+
+-- ==============================================================================
+-- 5. USER INTERFACE (MENU)
 -- ==============================================================================
 
 ui.newTab(kUiTab, kUiTab)
 
--- [LEFT COLUMN] - Macro Settings
 ui.newContainer(kUiTab, kUiMain, "Macro Settings", { autosize = true, next = true })
 
 ui.newDropdown(kUiTab, kUiMain, "Trigger Key 1", KeyNames, 0) 
 ui.newDropdown(kUiTab, kUiMain, "Trigger Key 2", KeyNames, 0) 
 ui.newDropdown(kUiTab, kUiMain, "Combo Logic", {"OR (Any Pressed)", "AND (All Pressed)"}, 0)
 ui.newDropdown(kUiTab, kUiMain, "Activation Mode", {"Hold", "Toggle", "Always On"}, 0)
-
-ui.newSliderInt(kUiTab, kUiMain, "Recoil X (Base)", -100, 100, 0)
-ui.newSliderInt(kUiTab, kUiMain, "Recoil Y", -100, 100, 0)
-
+ui.newSliderInt(kUiTab, kUiMain, "Recoil X", -80, 80, 0)
+ui.newSliderInt(kUiTab, kUiMain, "Recoil Y", -80, 80, 0)
 ui.newSliderInt(kUiTab, kUiMain, "Delay (ms)", 0, 50, 10)
 ui.newSliderInt(kUiTab, kUiMain, "Smoothness", 1, 20, 1)
 ui.newSliderInt(kUiTab, kUiMain, "Randomizer %", 0, 100, 0)
@@ -467,14 +587,12 @@ ui.newSliderInt(kUiTab, kUiMain, "Easing Time (ms)", 100, 10000, 1000)
 
 ui.newCheckbox(kUiTab, kUiMain, "Precision Mode (1/10)")
 
--- [RIGHT COLUMN] - Miscellaneous
 ui.newContainer(kUiTab, kUiMisc, "Miscellaneous", { autosize = true })
 ui.newCheckbox(kUiTab, kUiMisc, "Enable Recoil Macro")
 ui.newCheckbox(kUiTab, kUiMisc, "Tool Check")
-
+ui.newCheckbox(kUiTab, kUiMisc, "Unloaded Ammo Check") 
 ui.newCheckbox(kUiTab, kUiMisc, "Target Check (FOV)")
-ui.newCheckbox(kUiTab, kUiMisc, "Visualize FOV")
-ui.NewColorpicker(kUiTab, kUiMisc, "Target FOV Color", Color3.new(1, 1, 1), false) 
+ui.newCheckbox(kUiTab, kUiMisc, "Visualize FOV") 
 ui.newSliderInt(kUiTab, kUiMisc, "Target FOV", 5, 500, 100)
 
 ui.newCheckbox(kUiTab, kUiMisc, "Show Recoil Graph") 
@@ -496,55 +614,27 @@ ui.newButton(kUiTab, kUiMisc, "Save / Create Config", function()
     local easeIdx = ui.getValue(kUiTab, kUiMain, "Primary Easing")
     local easeIdx2 = ui.getValue(kUiTab, kUiMain, "Secondary Easing")
     
-    local cfg = {
+    AllConfigs[name] = {
         act_key1 = ui.getValue(kUiTab, kUiMain, "Trigger Key 1"),
         act_key2 = ui.getValue(kUiTab, kUiMain, "Trigger Key 2"),
         act_logic = ui.getValue(kUiTab, kUiMain, "Combo Logic"),
         act_mode = ui.getValue(kUiTab, kUiMain, "Activation Mode"),
-        recoil_x = ui.getValue(kUiTab, kUiMain, "Recoil X (Base)"),
+        recoil_x = ui.getValue(kUiTab, kUiMain, "Recoil X"),
         recoil_y = ui.getValue(kUiTab, kUiMain, "Recoil Y"),
         delay = ui.getValue(kUiTab, kUiMain, "Delay (ms)"),
         smooth = ui.getValue(kUiTab, kUiMain, "Smoothness"),
         randomizer = ui.getValue(kUiTab, kUiMain, "Randomizer %"),
         weak_mode = ui.getValue(kUiTab, kUiMain, "Precision Mode (1/10)"),
         tool_check = ui.getValue(kUiTab, kUiMisc, "Tool Check"),
+        ammo_check = ui.getValue(kUiTab, kUiMisc, "Unloaded Ammo Check"),
         easing_type = EasingNames[easeIdx+1] or "Constant",
         easing_type_2 = SecondaryEasingNames[easeIdx2+1] or "None",
         easing_time = ui.getValue(kUiTab, kUiMain, "Easing Time (ms)"),
-        
         target_check = ui.getValue(kUiTab, kUiMisc, "Target Check (FOV)"),
-        target_fov = ui.getValue(kUiTab, kUiMisc, "Target FOV"),
-        visualize_fov = ui.getValue(kUiTab, kUiMisc, "Visualize FOV"),
-        
-        magnet_enable = ui.getValue(kUiTab, kUiMagnet, "Enable Magnet Recoil"),
-        magnet_part = ui.getValue(kUiTab, kUiMagnet, "Aim Part"),
-        visualize_magnet_fov = ui.getValue(kUiTab, kUiMagnet, "Visualize Magnet FOV"),
-        magnet_fov = ui.getValue(kUiTab, kUiMagnet, "Magnet FOV"),
-        magnet_strength = ui.getValue(kUiTab, kUiMagnet, "Magnet Strength"),
-        magnet_smooth = ui.getValue(kUiTab, kUiMagnet, "Magnet Smoothness"),
-        
-        kf_enable = ui.getValue(kUiTabKF, kUiKFMain, "Enable Keyframing"),
-        visualize_kf_nodes = ui.getValue(kUiTabKF, kUiKFMain, "Visualize Keyframe Nodes"),
-        kf_show_graph = ui.getValue(kUiTabKF, kUiKFMain, "Show Timeline Graph"),
-        kf_gx = ui.getValue(kUiTabKF, kUiKFMain, "Graph Pos X"),
-        kf_gy = ui.getValue(kUiTabKF, kUiKFMain, "Graph Pos Y"),
-        kf_scale_x = ui.getValue(kUiTabKF, kUiKFMain, "Master Scale X (%)"),
-        kf_scale_y = ui.getValue(kUiTabKF, kUiKFMain, "Master Scale Y (%)"),
-        kf_count = ui.getValue(kUiTabKF, kUiKFMain, "Active Keyframes")
+        target_fov = ui.getValue(kUiTab, kUiMisc, "Target FOV")
     }
-    
-    for i = 1, 10 do
-        cfg["kf"..i.."_t"] = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Time (ms)")
-        cfg["kf"..i.."_x"] = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil X")
-        cfg["kf"..i.."_y"] = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil Y")
-        cfg["kf"..i.."_i"] = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Curve Type")
-        cfg["kf"..i.."_ten"] = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Tension")
-    end
-    
-    AllConfigs[name] = cfg
     SaveToFile()
-    UpdateConfigNames()
-    DebugPrint("[Universal] Saved Config: " .. name)
+    DebugPrint("[OpOne] Saved Config: " .. name)
 end)
 
 ui.newButton(kUiTab, kUiMisc, "Delete Config", function()
@@ -553,7 +643,7 @@ ui.newButton(kUiTab, kUiMisc, "Delete Config", function()
         AllConfigs[name] = nil
         ui.setValue(kUiTab, kUiMisc, "Config Name", "")
         SaveToFile()
-        DebugPrint("[Universal] Deleted Config: " .. name)
+        DebugPrint("[OpOne] Deleted Config: " .. name)
     end
 end)
 
@@ -562,9 +652,9 @@ ui.newButton(kUiTab, kUiMisc, "Export Config to Clipboard", function()
     if name and AllConfigs[name] then
         local str = SerializeConfig(name, AllConfigs[name])
         utility.SetClipboard(str)
-        DebugPrint("[Universal] Config '" .. name .. "' copied to clipboard!")
+        DebugPrint("[OpOne] Config '" .. name .. "' copied to clipboard!")
     else
-        DebugPrint("[Universal] Select a valid config to export.")
+        DebugPrint("[OpOne] Select a valid config to export.")
     end
 end)
 
@@ -585,105 +675,385 @@ ui.newButton(kUiTab, kUiMisc, "Import Config from Clipboard", function()
         UpdateConfigNames()
         LoadConfigData(name)
         
-        DebugPrint("[Universal] Config successfully imported as: " .. name)
+        DebugPrint("[OpOne] Config successfully imported as: " .. name)
     else
-        DebugPrint("[Universal] Failed to import. No valid config found in clipboard.")
+        DebugPrint("[OpOne] Failed to import. No valid config found in clipboard.")
     end
 end)
 
--- [RIGHT COLUMN] - Magnet Recoil
-ui.newContainer(kUiTab, kUiMagnet, "Magnet Recoil", { autosize = true })
-ui.newCheckbox(kUiTab, kUiMagnet, "Enable Magnet Recoil")
-ui.newDropdown(kUiTab, kUiMagnet, "Aim Part", {"Head", "Chest", "Center"}, 0)
-ui.newCheckbox(kUiTab, kUiMagnet, "Visualize Magnet FOV")
-ui.NewColorpicker(kUiTab, kUiMagnet, "Magnet FOV Color", Color3.new(0, 1, 1), false)
-ui.newSliderInt(kUiTab, kUiMagnet, "Magnet FOV", 5, 500, 100)
-ui.newSliderInt(kUiTab, kUiMagnet, "Magnet Strength", 1, 50, 10)
-ui.newSliderInt(kUiTab, kUiMagnet, "Magnet Smoothness", 1, 30, 10)
+ui.newButton(kUiTab, kUiMisc, "Link Weapon -> Config", function()
+    local wpnInstance, wpn = GetCurrentOperationOneWeapon()
+    local cfgName = ui.getValue(kUiTab, kUiMisc, "Config Name")
+    if wpn and cfgName and cfgName ~= "" and cfgName ~= "None" then
+        WeaponLinks[wpn] = cfgName
+        SaveWeaponLinks()
+        DebugPrint("[OpOne] Linked Weapon: [" .. wpn .. "] to Config: [" .. cfgName .. "]")
+    end
+end)
 
+ui.newButton(kUiTab, kUiMisc, "Unlink Current Weapon", function()
+    local wpnInstance, wpn = GetCurrentOperationOneWeapon()
+    if wpn and WeaponLinks[wpn] then
+        WeaponLinks[wpn] = nil
+        SaveWeaponLinks()
+        DebugPrint("[OpOne] Unlinked Weapon: [" .. wpn .. "]")
+    end
+end)
+
+ui.newCheckbox(kUiTab, kUiMisc, "Fallback to Default Config")
+pcall(function() ui.setValue(kUiTab, kUiMisc, "Fallback to Default Config", MasterSettings.UseDefaultConfig) end)
+
+ui.newInputText(kUiTab, kUiMisc, "Default Config", MasterSettings.DefaultConfigName or "")
+ui.newButton(kUiTab, kUiMisc, "Set Default Config", function()
+    local defName = ui.getValue(kUiTab, kUiMisc, "Default Config")
+    MasterSettings.DefaultConfigName = defName
+    SaveMasterSettings()
+    DebugPrint("[OpOne] Default Fallback Config set to: " .. defName)
+end)
+
+-- Keyframing Toggle
+ui.newCheckbox(kUiTab, kUiMisc, "Enable Keyframing")
 
 -- ==============================================================================
--- 4.5. NEW KEYFRAMES TAB (DAVINCI RESOLVE STYLE)
+-- 6. KEYFRAME EDITOR SYSTEM
 -- ==============================================================================
+local KeyframeCache = {}
+local isKeyframeEditorOpen = false
+local f5_was_pressed = false
+local SelectedKFPoints = {}
+local KF_DragPoint = nil
+local KF_DragSlider = nil
+local KF_ButtonLatch = false
 
-ui.newTab(kUiTabKF, "Keyframes")
+local KF_Win1 = {x = 300, y = 200, w = 500, h = 300, dragging = false, dx = 0, dy = 0}
+local KF_Win2 = {x = 820, y = 200, w = 200, h = 300, dragging = false, dx = 0, dy = 0}
 
-ui.newContainer(kUiTabKF, kUiKFMain, "Keyframe Control", { autosize = true, next = true })
-ui.newCheckbox(kUiTabKF, kUiKFMain, "Enable Keyframing")
-ui.newCheckbox(kUiTabKF, kUiKFMain, "Visualize Keyframe Nodes")
-ui.newCheckbox(kUiTabKF, kUiKFMain, "Show Timeline Graph")
-ui.newSliderInt(kUiTabKF, kUiKFMain, "Graph Pos X", 0, 2500, 600)
-ui.newSliderInt(kUiTabKF, kUiKFMain, "Graph Pos Y", 0, 1500, 300)
-ui.newSliderInt(kUiTabKF, kUiKFMain, "Master Scale X (%)", -200, 200, 100)
-ui.newSliderInt(kUiTabKF, kUiKFMain, "Master Scale Y (%)", -200, 200, 100)
-ui.newSliderInt(kUiTabKF, kUiKFMain, "Active Keyframes", 1, 10, 3)
-
-ui.newContainer(kUiTabKF, kUiKFPoints, "Keyframe Points", { autosize = true })
-for i = 1, 10 do
-    ui.newSliderInt(kUiTabKF, kUiKFPoints, "KF"..i.." Time (ms)", 1, 10000, i * 200)
-    ui.newSliderInt(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil X", -100, 100, 0)
-    ui.newSliderInt(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil Y", -100, 100, 0)
-    ui.newDropdown(kUiTabKF, kUiKFPoints, "KF"..i.." Curve Type", {"Linear", "Bezier Curve (Smooth)", "Hold", "Ease In", "Ease Out", "Ease In-Out", "Bounce (Out Back)"}, 0)
-    ui.newSliderInt(kUiTabKF, kUiKFPoints, "KF"..i.." Tension", 10, 100, 20)
+local function SaveKeyframes()
+    local content = ""
+    for cfg, data in pairs(KeyframeCache) do
+        content = content .. "[" .. cfg .. "]\n"
+        content = content .. "count=" .. tostring(data.count) .. "\n"
+        content = content .. "smoothing=" .. tostring(data.smoothing) .. "\n"
+        local pts_str = {}
+        for _, p in ipairs(data.points) do
+            table.insert(pts_str, tostring(p.t) .. "," .. tostring(p.v))
+        end
+        content = content .. "points=" .. table.concat(pts_str, ";") .. "\n\n"
+    end
+    file.write(KF_FILE_PATH, content)
 end
 
+local function LoadKeyframes()
+    local content = file.read(KF_FILE_PATH)
+    if not content or content == "" then return end
+    local current_cfg = nil
+    for line in string.gmatch(content, "[^\r\n]+") do
+        local cfg_match = string.match(line, "^%[(.-)%]$")
+        if cfg_match then
+            current_cfg = cfg_match
+            KeyframeCache[current_cfg] = {points = {}, count = 2, smoothing = 0.5}
+        elseif current_cfg then
+            local k, v = string.match(line, "^(.-)=(.-)$")
+            if k == "count" then KeyframeCache[current_cfg].count = tonumber(v) or 2
+            elseif k == "smoothing" then KeyframeCache[current_cfg].smoothing = tonumber(v) or 0.5
+            elseif k == "points" then
+                local pts = {}
+                for pt_str in string.gmatch(v, "([^;]+)") do
+                    local pt, pv = string.match(pt_str, "(.-),(.-)$")
+                    if pt and pv then table.insert(pts, {t=tonumber(pt), v=tonumber(pv)}) end
+                end
+                KeyframeCache[current_cfg].points = pts
+            end
+        end
+    end
+end
+LoadKeyframes()
 
--- ==============================================================================
--- 5. VISUAL RENDERING (ESP & OVERLAYS)
--- ==============================================================================
+local function GetOrCreateKFData(cfgName)
+    if not cfgName or cfgName == "None" then return nil end
+    if not KeyframeCache[cfgName] then
+        KeyframeCache[cfgName] = {points = {{t=0, v=0}, {t=1, v=1}}, count = 2, smoothing = 0.5}
+        SaveKeyframes()
+    end
+    return KeyframeCache[cfgName]
+end
 
-local function GetCurrentRecoil(elapsedTime)
-    local rXBase = ui.getValue(kUiTab, kUiMain, "Recoil X (Base)") or 0
-    local rYBase = ui.getValue(kUiTab, kUiMain, "Recoil Y") or 0
+local function SetKeyframeCount(cfgName, count)
+    local data = GetOrCreateKFData(cfgName)
+    if not data then return end
+    count = math.max(2, math.min(20, count))
+    local new_points = {}
+    for i=1, count do
+        local t = (i-1)/(count-1)
+        local v = 0
+        -- try to preserve existing shape
+        if #data.points > 0 then
+            local closest = data.points[1]
+            for _, p in ipairs(data.points) do
+                if math.abs(p.t - t) < math.abs(closest.t - t) then closest = p end
+            end
+            v = closest.v
+        end
+        table.insert(new_points, {t = t, v = v})
+    end
+    data.points = new_points
+    data.count = count
+    SaveKeyframes()
+end
 
-    if not ui.getValue(kUiTabKF, kUiKFMain, "Enable Keyframing") then
-        return rXBase, rYBase
+local function EvaluateCurve(t, data)
+    if not data or #data.points < 2 then return 1.0 end
+    t = math.max(0, math.min(1, t))
+    local p1, p2
+    for i=1, #data.points-1 do
+        if data.points[i].t <= t and data.points[i+1].t >= t then
+            p1 = data.points[i]
+            p2 = data.points[i+1]
+            break
+        end
+    end
+    if not p1 then
+        if t <= data.points[1].t then return data.points[1].v end
+        return data.points[#data.points].v
+    end
+    
+    local lt = (t - p1.t) / (p2.t - p1.t)
+    local linear_v = p1.v + (p2.v - p1.v) * lt
+    
+    -- Simple Catmull-Rom for Bezier-like smoothing
+    local p0 = data.points[1]
+    local p3 = data.points[#data.points]
+    for i=1, #data.points-1 do
+        if data.points[i].t <= p1.t and data.points[i+1].t >= p1.t then
+            p0 = data.points[i] or p1
+            p3 = data.points[i+2] or p2
+            break
+        end
+    end
+    
+    local catmull_v = 0.5 * (
+        (2 * p1.v) +
+        (-p0.v + p2.v) * lt +
+        (2*p0.v - 5*p1.v + 4*p2.v - p3.v) * lt^2 +
+        (-p0.v + 3*p1.v - 3*p2.v + p3.v) * lt^3
+    )
+    
+    local smooth = data.smoothing or 0
+    return linear_v * (1 - smooth) + catmull_v * smooth
+end
+
+local function PointInRect(px, py, rx, ry, rw, rh)
+    return px >= rx and px <= rx + rw and py >= ry and py <= ry + rh
+end
+
+local function DrawSlider(x, y, w, label, min, max, val)
+    local mp = utility.GetMousePos()
+    local mx, my = mp[1], mp[2]
+    local is_lmb = keyboard.IsPressed(1)
+    
+    draw.TextOutlined(label, x, y - 15, Color3.new(1,1,1), "SmallestPixel", 255)
+    draw.RectFilled(x, y, w, 5, Color3.new(0.2, 0.2, 0.2), 0, 255)
+    
+    local t = (val - min) / (max - min)
+    local hx = x + (w * t)
+    
+    if is_lmb and PointInRect(mx, my, x-5, y-5, w+10, 15) and not KF_DragPoint then
+        KF_DragSlider = label
+    end
+    if not is_lmb then KF_DragSlider = nil end
+    
+    if KF_DragSlider == label then
+        local rel_x = math.max(0, math.min(w, mx - x))
+        t = rel_x / w
+        val = min + (max - min) * t
+    end
+    
+    draw.CircleFilled(hx, y + 2, 5, Color3.new(0, 1, 1), 6, 255)
+    return val
+end
+
+local function DrawButton(x, y, w, h, label)
+    local mp = utility.GetMousePos()
+    local mx, my = mp[1], mp[2]
+    local is_lmb = keyboard.IsPressed(1)
+    local hovered = PointInRect(mx, my, x, y, w, h)
+    local color = hovered and Color3.new(0.3, 0.6, 0.3) or Color3.new(0.2, 0.2, 0.2)
+    draw.RectFilled(x, y, w, h, color, 0, 255)
+    draw.Rect(x, y, w, h, Color3.new(0, 0.8, 0.5), 1, 0, 255)
+    draw.TextOutlined(label, x + 5, y + 4, Color3.new(1,1,1), "SmallestPixel", 255)
+    
+    if hovered and is_lmb and not KF_ButtonLatch and not KF_DragPoint and not KF_DragSlider then
+        KF_ButtonLatch = true
+        return true
+    end
+    if not is_lmb then KF_ButtonLatch = false end
+    return false
+end
+
+local function DrawWindow(win, title)
+    local mp = utility.GetMousePos()
+    local mx, my = mp[1], mp[2]
+    local is_lmb = keyboard.IsPressed(1)
+    
+    draw.RectFilled(win.x, win.y, win.w, win.h, Color3.new(0.08, 0.08, 0.08), 0, 240)
+    draw.Rect(win.x, win.y, win.w, win.h, Color3.new(0, 0.8, 0.5), 1, 0, 255)
+    draw.RectFilled(win.x, win.y, win.w, 20, Color3.new(0.1, 0.1, 0.1), 0, 240)
+    draw.TextOutlined(title, win.x + 5, win.y + 4, Color3.new(1,1,1), "SmallestPixel", 255)
+    
+    if is_lmb and PointInRect(mx, my, win.x, win.y, win.w, 20) and not KF_DragPoint and not KF_DragSlider then
+        if not win.dragging then
+            win.dragging = true
+            win.dx = mx - win.x
+            win.dy = my - win.y
+        end
+    end
+    if not is_lmb then win.dragging = false end
+    
+    if win.dragging then
+        win.x = mx - win.dx
+        win.y = my - win.dy
+    end
+end
+
+local function DrawKeyframeEditor()
+    if not IsScriptActive or not utility.GetMenuState() then return end
+    local s1, kf_enabled = pcall(ui.getValue, kUiTab, kUiMisc, "Enable Keyframing")
+    if not s1 or not kf_enabled or not isKeyframeEditorOpen then return end
+
+    local cfgName = DebugState.Config
+    if not cfgName or cfgName == "None" then return end
+    local data = GetOrCreateKFData(cfgName)
+    if not data then return end
+
+    DrawWindow(KF_Win1, "Spline Editor - " .. cfgName)
+    DrawWindow(KF_Win2, "Spline & Smoothing Controls")
+
+    local gx, gy, gw, gh = KF_Win1.x + 20, KF_Win1.y + 40, KF_Win1.w - 40, KF_Win1.h - 60
+    draw.RectFilled(gx, gy, gw, gh, Color3.new(0.05, 0.05, 0.05), 0, 255)
+    draw.Rect(gx, gy, gw, gh, Color3.new(0.3, 0.3, 0.3), 1, 0, 255)
+    draw.Line(gx, gy + gh/2, gx + gw, gy + gh/2, Color3.new(0.2, 0.2, 0.2), 1, 100)
+
+    local mp = utility.GetMousePos()
+    local mx, my = mp[1], mp[2]
+    local is_lmb = keyboard.IsPressed(1)
+    local shift_down = keyboard.IsPressed(16) -- Shift
+
+    -- Curve Drawing
+    local prev_sx, prev_sy
+    for i=0, 1, 0.02 do
+        local v = EvaluateCurve(i, data)
+        local sx = gx + (i * gw)
+        local sy = gy + gh - (v * gh)
+        if prev_sx then
+            draw.Line(prev_sx, prev_sy, sx, sy, Color3.new(0, 1, 1), 2, 255)
+        end
+        prev_sx, prev_sy = sx, sy
     end
 
-    local activeKFs = ui.getValue(kUiTabKF, kUiKFMain, "Active Keyframes") or 3
-    local scaleX = (ui.getValue(kUiTabKF, kUiKFMain, "Master Scale X (%)") or 100) / 100.0
-    local scaleY = (ui.getValue(kUiTabKF, kUiKFMain, "Master Scale Y (%)") or 100) / 100.0
-    
-    local pts = {
-        { t = 0, x = rXBase, y = rYBase, interp = 0, tension = 2.0 }
-    }
-    
-    local lastT = 0
-    for i = 1, activeKFs do
-        local kf_t = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Time (ms)") or 0
-        local kf_x = (ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil X") or 0) * scaleX
-        local kf_y = (ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil Y") or 0) * scaleY
-        local kf_interp = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Curve Type") or 0
-        local kf_tensionRaw = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Tension") or 20
-        
-        kf_t = math.max(lastT + 1, kf_t)
-        table.insert(pts, { t = kf_t, x = kf_x, y = kf_y, interp = kf_interp, tension = kf_tensionRaw / 10.0 })
-        lastT = kf_t
-    end
-
-    for i = 1, #pts - 1 do
-        local p1 = pts[i]
-        local p2 = pts[i+1]
-        
-        if elapsedTime >= p1.t and elapsedTime <= p2.t then
-            local range = p2.t - p1.t
-            if range <= 0 then return p2.x, p2.y end
-            
-            local alpha = (elapsedTime - p1.t) / range
-            -- A curva de como a animação CHEGA no ponto P2 é controlada pelas definições de P2
-            alpha = GetKeyframeAlpha(alpha, p2.interp, p2.tension)
-            
-            local curX = p1.x + (p2.x - p1.x) * alpha
-            local curY = p1.y + (p2.y - p1.y) * alpha
-            
-            return curX, curY
+    -- Point Interaction
+    local clicked_this_frame = false
+    if is_lmb and not KF_DragSlider and PointInRect(mx, my, gx-10, gy-10, gw+20, gh+20) then
+        if not KF_DragPoint then
+            for i, p in ipairs(data.points) do
+                local px = gx + (p.t * gw)
+                local py = gy + gh - (p.v * gh)
+                if math.abs(mx - px) < 8 and math.abs(my - py) < 8 then
+                    KF_DragPoint = i
+                    if not shift_down then
+                        SelectedKFPoints = {i}
+                    else
+                        local found = false
+                        for idx, sel in ipairs(SelectedKFPoints) do
+                            if sel == i then table.remove(SelectedKFPoints, idx); found = true; break end
+                        end
+                        if not found then table.insert(SelectedKFPoints, i) end
+                    end
+                    clicked_this_frame = true
+                    break
+                end
+            end
+        end
+        if not clicked_this_frame and not KF_DragPoint and PointInRect(mx, my, gx, gy, gw, gh) then
+            SelectedKFPoints = {}
         end
     end
 
-    local lastPt = pts[#pts]
-    return lastPt.x, lastPt.y
+    if not is_lmb then 
+        if KF_DragPoint then SaveKeyframes() end
+        KF_DragPoint = nil 
+    end
+
+    for i, p in ipairs(data.points) do
+        local px = gx + (p.t * gw)
+        local py = gy + gh - (p.v * gh)
+        
+        local is_selected = false
+        for _, sel in ipairs(SelectedKFPoints) do if sel == i then is_selected = true; break end end
+
+        local color = is_selected and Color3.new(1, 1, 0) or Color3.new(1, 1, 1)
+        if KF_DragPoint == i then color = Color3.new(0, 1, 0) end
+        
+        draw.CircleFilled(px, py, 5, color, 6, 255)
+        
+        if KF_DragPoint == i or (is_selected and KF_DragPoint) then
+            local new_t = (mx - gx) / gw
+            local new_v = 1 - (my - gy) / gh
+            
+            if #SelectedKFPoints <= 1 then
+                local prev_t = i > 1 and data.points[i-1].t or 0
+                local next_t = i < #data.points and data.points[i+1].t or 1
+                p.t = math.max(prev_t, math.min(next_t, new_t))
+            end
+            p.v = math.max(0, math.min(1, new_v))
+        end
+    end
+
+    -- Controls Window
+    local cy = KF_Win2.y + 30
+    data.smoothing = DrawSlider(KF_Win2.x + 20, cy, 160, "Smoothing (Tension)", 0, 1, data.smoothing or 0)
+    cy = cy + 30
+    local new_count = DrawSlider(KF_Win2.x + 20, cy, 160, "Keyframe Count", 2, 20, data.count or 2)
+    cy = cy + 30
+    
+    if math.floor(new_count) ~= data.count then
+        SetKeyframeCount(cfgName, math.floor(new_count))
+    end
+
+    local btn_w, btn_h = 80, 25
+    if DrawButton(KF_Win2.x + 20, cy, btn_w, btn_h, "Linear") then
+        local pts = #SelectedKFPoints > 0 and SelectedKFPoints or (function() local t={}; for i=1,#data.points do t[i]=i end return t end)()
+        for _, idx in ipairs(pts) do
+            data.points[idx].v = data.points[idx].t
+        end
+        SaveKeyframes()
+    end
+    if DrawButton(KF_Win2.x + 110, cy, btn_w, btn_h, "Ease In") then
+        local pts = #SelectedKFPoints > 0 and SelectedKFPoints or (function() local t={}; for i=1,#data.points do t[i]=i end return t end)()
+        for _, idx in ipairs(pts) do
+            data.points[idx].v = data.points[idx].t * data.points[idx].t
+        end
+        SaveKeyframes()
+    end
+    cy = cy + 35
+    if DrawButton(KF_Win2.x + 20, cy, btn_w, btn_h, "Ease Out") then
+        local pts = #SelectedKFPoints > 0 and SelectedKFPoints or (function() local t={}; for i=1,#data.points do t[i]=i end return t end)()
+        for _, idx in ipairs(pts) do
+            data.points[idx].v = 1 - ((1 - data.points[idx].t) * (1 - data.points[idx].t))
+        end
+        SaveKeyframes()
+    end
+    if DrawButton(KF_Win2.x + 110, cy, btn_w, btn_h, "Smooth") then
+        local pts = #SelectedKFPoints > 0 and SelectedKFPoints or (function() local t={}; for i=1,#data.points do t[i]=i end return t end)()
+        for _, idx in ipairs(pts) do
+            data.points[idx].v = data.points[idx].t * data.points[idx].t * (3 - 2 * data.points[idx].t)
+        end
+        SaveKeyframes()
+    end
 end
 
+-- ==============================================================================
+-- 7. DRAWING LOGIC (RECOIL GRAPH, FOV, DEBUG HUD & RECOIL LINE)
+-- ==============================================================================
 local function DrawDebugHUD()
     if not IsScriptActive then return end
     if not ui.getValue(kUiTab, kUiMisc, "Debug") then return end
@@ -691,31 +1061,33 @@ local function DrawDebugHUD()
     
     local pad = 10
     local startX, startY = 15, 15
-    local w, h = 260, 155
+    local w, h = 260, 180
     local white = Color3.new(1, 1, 1)
     
     draw.RectFilled(startX, startY, w, h, Color3.new(0.05, 0.05, 0.05), 5, 200)
     draw.Rect(startX, startY, w, h, Color3.new(0, 0.8, 0.5), 1, 5, 255)
     
-    draw.TextOutlined("UNIVERSAL DEBUG STATUS", startX + pad, startY + pad, Color3.new(0, 1, 0), "SmallestPixel", 255)
+    draw.TextOutlined("RECOIL DEBUG STATUS", startX + pad, startY + pad, Color3.new(0, 1, 0), "SmallestPixel", 255)
     draw.TextOutlined("Weapon: " .. tostring(DebugState.Weapon), startX + pad, startY + pad + 20, white, "SmallestPixel", 255)
     draw.TextOutlined("Config: " .. tostring(DebugState.Config), startX + pad, startY + pad + 35, white, "SmallestPixel", 255)
+    draw.TextOutlined("Link Status: " .. tostring(DebugState.LinkedTools), startX + pad, startY + pad + 50, Color3.new(0, 1, 1), "SmallestPixel", 255)
+    draw.TextOutlined("Ammo: " .. tostring(DebugState.AmmoInfo), startX + pad, startY + pad + 65, Color3.new(1, 1, 0), "SmallestPixel", 255)
     
     local fireColor = DebugState.Firing and Color3.new(0, 1, 0) or Color3.new(1, 0, 0)
-    draw.TextOutlined("Firing: " .. tostring(DebugState.Firing), startX + pad, startY + pad + 50, fireColor, "SmallestPixel", 255)
+    draw.TextOutlined("Firing: " .. tostring(DebugState.Firing), startX + pad, startY + pad + 80, fireColor, "SmallestPixel", 255)
     
     local toolColor = DebugState.ToolValid and Color3.new(0, 1, 0) or Color3.new(1, 0, 0)
-    draw.TextOutlined("Tool Valid: " .. tostring(DebugState.ToolValid), startX + pad, startY + pad + 65, toolColor, "SmallestPixel", 255)
+    draw.TextOutlined("Tool Valid: " .. tostring(DebugState.ToolValid), startX + pad, startY + pad + 95, toolColor, "SmallestPixel", 255)
     
     local isTargetCheckEnabled = ui.getValue(kUiTab, kUiMisc, "Target Check (FOV)")
     local fovStatus = isTargetCheckEnabled and tostring(DebugState.TargetFOV) or "False (Disabled)"
     local fovColor = DebugState.TargetFOV and Color3.new(0, 1, 0) or Color3.new(1, 0, 0)
     
-    draw.TextOutlined("Target FOV Valid: " .. fovStatus, startX + pad, startY + pad + 80, fovColor, "SmallestPixel", 255)
-    draw.TextOutlined("Current Target: " .. tostring(DebugState.CurrentTarget), startX + pad, startY + pad + 95, Color3.new(1, 0.6, 0), "SmallestPixel", 255)
+    draw.TextOutlined("Target FOV Valid: " .. fovStatus, startX + pad, startY + pad + 110, fovColor, "SmallestPixel", 255)
+    draw.TextOutlined("Current Target: " .. tostring(DebugState.CurrentTarget), startX + pad, startY + pad + 125, Color3.new(1, 0.6, 0), "SmallestPixel", 255)
     
     local accStr = string.format("Acc X: %.2f | Acc Y: %.2f", DebugState.AccX, DebugState.AccY)
-    draw.TextOutlined(accStr, startX + pad, startY + pad + 115, Color3.new(0.8, 0.8, 0.8), "SmallestPixel", 255)
+    draw.TextOutlined(accStr, startX + pad, startY + pad + 145, Color3.new(0.8, 0.8, 0.8), "SmallestPixel", 255)
 end
 
 local function DrawActiveRecoilLine()
@@ -759,135 +1131,15 @@ end
 
 local function DrawOverlayFOV()
     if not IsScriptActive then return end
-    
-    local w, h = ScreenSize.w, ScreenSize.h
-    if w == 0 then updateScreenSize(); w = ScreenSize.w; h = ScreenSize.h end
-    local cx, cy = w/2, h/2
-    
     local targetCheck = ui.getValue(kUiTab, kUiMisc, "Target Check (FOV)")
     local showFov = ui.getValue(kUiTab, kUiMisc, "Visualize FOV")
+    if not targetCheck or not showFov then return end
     
-    if showFov then
-        local fovRadius = ui.getValue(kUiTab, kUiMisc, "Target FOV") or 100
-        local customColor = SafeGetColor3(kUiTab, kUiMisc, "Target FOV Color", 255, 255, 255)
-        draw.Circle(cx, cy, fovRadius, customColor, 1, 64, 255)
-    end
+    local fovRadius = ui.getValue(kUiTab, kUiMisc, "Target FOV") or 100
+    local w, h = ScreenSize.w, ScreenSize.h
+    if w == 0 then updateScreenSize(); w = ScreenSize.w; h = ScreenSize.h end
     
-    local magCheck = ui.getValue(kUiTab, kUiMagnet, "Enable Magnet Recoil")
-    local showMagFov = ui.getValue(kUiTab, kUiMagnet, "Visualize Magnet FOV")
-    
-    if magCheck and showMagFov then
-        local magFovRadius = ui.getValue(kUiTab, kUiMagnet, "Magnet FOV") or 100
-        local magCustomColor = SafeGetColor3(kUiTab, kUiMagnet, "Magnet FOV Color", 0, 255, 255)
-        draw.Circle(cx, cy, magFovRadius, magCustomColor, 1, 64, 255)
-    end
-end
-
--- Novo Timeline Graph ao Estilo DaVinci / Premiere
-local function DrawTimelineGraph()
-    if not IsScriptActive or not utility.GetMenuState() then return end
-    local kfCheck = ui.getValue(kUiTabKF, kUiKFMain, "Enable Keyframing")
-    local showTimeline = ui.getValue(kUiTabKF, kUiKFMain, "Show Timeline Graph")
-    if not kfCheck or not showTimeline then return end
-
-    local gx = tonumber(ui.getValue(kUiTabKF, kUiKFMain, "Graph Pos X")) or 600
-    local gy = tonumber(ui.getValue(kUiTabKF, kUiKFMain, "Graph Pos Y")) or 300
-    local boxW, boxH = 400, 200
-    
-    local mousePos = utility.GetMousePos()
-    local mx, my = (mousePos and mousePos.x or 0), (mousePos and mousePos.y or 0)
-    local isLmbDown = keyboard and keyboard.IsPressed(1)
-    
-    if isLmbDown then
-        if not isDraggingTimeline then
-            if mx >= gx and mx <= (gx + boxW) and my >= gy and my <= (gy + boxH) then
-                isDraggingTimeline = true; tlDragOffsetX = mx - gx; tlDragOffsetY = my - gy
-            end
-        else
-            local nx, ny = mx - tlDragOffsetX, my - tlDragOffsetY
-            pcall(ui.setValue, kUiTabKF, kUiKFMain, "Graph Pos X", nx)
-            pcall(ui.setValue, kUiTabKF, kUiKFMain, "Graph Pos Y", ny)
-            gx, gy = nx, ny
-        end
-    else isDraggingTimeline = false end
-
-    if draw then
-        draw.RectFilled(gx, gy, boxW, boxH, Color3.new(0.05, 0.05, 0.05), 0, 240)
-        draw.Rect(gx, gy, boxW, boxH, isDraggingTimeline and Color3.new(1,1,1) or Color3.new(0, 0.8, 0.5), 1, 0, 255)
-        draw.TextOutlined("KEYFRAME TIMELINE (RED=X, GREEN=Y)", gx + 5, gy + 5, Color3.new(1,1,1), "SmallestPixel", 200)
-
-        local activeKFs = ui.getValue(kUiTabKF, kUiKFMain, "Active Keyframes") or 3
-        local maxTime = 1
-        for i = 1, activeKFs do
-            local kt = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Time (ms)") or 0
-            if kt > maxTime then maxTime = kt end
-        end
-        if maxTime < 100 then maxTime = 100 end 
-        
-        local minVal, maxVal = 0, 0
-        local rXBase = ui.getValue(kUiTab, kUiMain, "Recoil X (Base)") or 0
-        local rYBase = ui.getValue(kUiTab, kUiMain, "Recoil Y") or 0
-        
-        local scaleX = (ui.getValue(kUiTabKF, kUiKFMain, "Master Scale X (%)") or 100) / 100.0
-        local scaleY = (ui.getValue(kUiTabKF, kUiKFMain, "Master Scale Y (%)") or 100) / 100.0
-        
-        local function checkBounds(x, y)
-            if x < minVal then minVal = x end; if x > maxVal then maxVal = x end
-            if y < minVal then minVal = y end; if y > maxVal then maxVal = y end
-        end
-        checkBounds(rXBase, rYBase)
-        
-        for i = 1, activeKFs do
-            checkBounds((ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil X") or 0)*scaleX, (ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil Y") or 0)*scaleY)
-        end
-        
-        local rangeVal = maxVal - minVal
-        if rangeVal == 0 then rangeVal = 1 end
-        local zeroY = gy + boxH - ((0 - minVal) / rangeVal) * (boxH - 40) - 20
-        
-        -- Zero Line (Reference point)
-        draw.Line(gx, zeroY, gx + boxW, zeroY, Color3.new(0.3, 0.3, 0.3), 1, 150)
-        draw.TextOutlined("0", gx + boxW - 15, zeroY - 5, Color3.new(0.5, 0.5, 0.5), "SmallestPixel", 200)
-        
-        local prevEx, prevEyX, prevEyY = nil, nil, nil
-        local resolution = boxW 
-        
-        for i = 0, resolution do
-            local t = (i / resolution) * maxTime
-            local curX, curY = GetCurrentRecoil(t)
-            
-            local plotX = gx + i
-            local plotY_X = gy + boxH - ((curX - minVal) / rangeVal) * (boxH - 40) - 20
-            local plotY_Y = gy + boxH - ((curY - minVal) / rangeVal) * (boxH - 40) - 20
-            
-            if prevEx then
-                draw.Line(prevEx, prevEyX, plotX, plotY_X, Color3.new(1, 0.2, 0.2), 2, 255)
-                draw.Line(prevEx, prevEyY, plotX, plotY_Y, Color3.new(0.2, 1, 0.2), 2, 255)
-            end
-            prevEx, prevEyX, prevEyY = plotX, plotY_X, plotY_Y
-        end
-        
-        -- Draw the Keyframe Nodes exactly on the timeline
-        local lastT = 0
-        for i = 1, activeKFs do
-            local kt = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Time (ms)") or 0
-            kt = math.max(lastT + 1, kt)
-            lastT = kt
-            
-            local kX = (ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil X") or 0) * scaleX
-            local kY = (ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Recoil Y") or 0) * scaleY
-            
-            local plotX = gx + (kt / maxTime) * boxW
-            local plotY_X = gy + boxH - ((kX - minVal) / rangeVal) * (boxH - 40) - 20
-            local plotY_Y = gy + boxH - ((kY - minVal) / rangeVal) * (boxH - 40) - 20
-            
-            draw.CircleFilled(plotX, plotY_X, 3, Color3.new(1, 0.5, 0.5), 8, 255)
-            draw.CircleFilled(plotX, plotY_Y, 3, Color3.new(0.5, 1, 0.5), 8, 255)
-            
-            draw.Line(plotX, gy + 20, plotX, gy + boxH, Color3.new(0.5, 0.5, 0.5), 1, 50)
-            draw.TextOutlined("K" .. i, plotX - 6, gy + boxH - 12, Color3.new(1, 1, 1), "SmallestPixel", 200)
-        end
-    end
+    draw.Circle(w/2, h/2, fovRadius, Color3.new(1, 1, 1), 1, 64, 255)
 end
 
 local function SafeDrawGraph()
@@ -921,6 +1173,8 @@ local function SafeDrawGraph()
         draw.Rect(gx, gy, boxSize, boxSize, isDraggingGraph and Color3.new(1,1,1) or Color3.new(0, 0.8, 0.5), 1, 0, 255)
         draw.TextOutlined("RECOIL SIMULATION", gx + 5, gy + 5, Color3.new(1,1,1), "SmallestPixel", 200)
 
+        local rX = ui.getValue(kUiTab, kUiMain, "Recoil X") or 0
+        local rY = ui.getValue(kUiTab, kUiMain, "Recoil Y") or 0
         local easingTime = ui.getValue(kUiTab, kUiMain, "Easing Time (ms)") or 1000
         local easeIdx1 = ui.getValue(kUiTab, kUiMain, "Primary Easing") or 0
         local easeIdx2 = ui.getValue(kUiTab, kUiMain, "Secondary Easing") or 0
@@ -928,8 +1182,6 @@ local function SafeDrawGraph()
         local isWeak = ui.getValue(kUiTab, kUiMain, "Precision Mode (1/10)")
         local randPerc = ui.getValue(kUiTab, kUiMain, "Randomizer %") or 0
         local baseFactor = isWeak and 10 or 1 
-        
-        local kfCheck = ui.getValue(kUiTabKF, kUiKFMain, "Enable Keyframing")
 
         local simPoints = {}
         local simX, simY = 0, 0
@@ -941,15 +1193,17 @@ local function SafeDrawGraph()
             local progress = t / easingTime
             if progress > 1 then progress = 1 end
             
-            local mult = 1.0
-            if not kfCheck then
+            local mult
+            local kf_enabled = ui.getValue(kUiTab, kUiMisc, "Enable Keyframing")
+            local current_cfg = DebugState.Config
+            if kf_enabled and current_cfg and current_cfg ~= "None" and KeyframeCache[current_cfg] then
+                mult = EvaluateCurve(progress, KeyframeCache[current_cfg])
+            else
                 mult = GetBlendedEasing(progress, easeIdx1, easeIdx2)
             end
             
-            local curRx, curRy = GetCurrentRecoil(t)
-            
-            local stepX = (curRx / baseFactor) * mult
-            local stepY = (curRy / baseFactor) * mult
+            local stepX = (rX / baseFactor) * mult
+            local stepY = (rY / baseFactor) * mult
             
             if randPerc > 0 then
                 local randStr = (randPerc / 100) * 1.5
@@ -993,27 +1247,36 @@ local function SafeDrawGraph()
         end
         draw.CircleFilled(centerX, centerY, 3, Color3.new(1,1,1), 8, 255)
         
-        local showNodes = ui.getValue(kUiTabKF, kUiKFMain, "Visualize Keyframe Nodes")
-        if kfCheck and showNodes then
-            local activeKFs = ui.getValue(kUiTabKF, kUiKFMain, "Active Keyframes") or 1
-            local lastT = 0
-            for i = 1, activeKFs do
-                local kt = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Time (ms)") or 0
-                kt = math.max(lastT + 1, kt)
-                lastT = kt
-                
-                -- Se a simulação chegou no tempo desse KF, desenha-o
-                for j = 1, #simPoints do
-                    local st = (j / #simPoints) * easingTime
-                    if math.abs(st - kt) < (easingTime / #simPoints) then
-                        local nx = centerX + simPoints[j].x * finalScale
-                        local ny = centerY - simPoints[j].y * finalScale
-                        draw.CircleFilled(nx, ny, 4, Color3.new(0, 1, 1), 8, 255)
-                        draw.TextOutlined("KF" .. i, nx + 6, ny - 6, Color3.new(0, 1, 1), "SmallestPixel", 255)
-                        break
-                    end
-                end
+        local targetCheck = ui.getValue(kUiTab, kUiMisc, "Target Check (FOV)")
+        local showFov = ui.getValue(kUiTab, kUiMisc, "Visualize FOV")
+        if targetCheck and showFov then
+            local fovRadius = ui.getValue(kUiTab, kUiMisc, "Target FOV") or 100
+            draw.Circle(centerX, centerY, fovRadius * (finalScale * 0.5), Color3.new(1, 1, 1), 1, 12, 100) 
+        end
+
+        local miniSize = math.max(30, math.floor(boxSize * 0.22))
+        local miniX = (gx + boxSize) - miniSize - 10
+        local miniY = (gy + boxSize) - miniSize - 10
+        
+        draw.RectFilled(miniX, miniY, miniSize, miniSize, Color3.new(0,0,0), 0, 150)
+        draw.Rect(miniX, miniY, miniSize, miniSize, Color3.new(0.5,0.5,0.5), 1, 0, 200)
+        draw.TextOutlined("CURVE", miniX, miniY - 10, Color3.new(0.8,0.8,0.8), "SmallestPixel", 200)
+
+        local isPureConstant = (EasingNames[easeIdx1 + 1] == "Constant") and (easeIdx2 == 0)
+        local prevEx, prevEy = nil, nil
+        for i = 0, miniSize do
+            local t = i / miniSize
+            local val = isPureConstant and 0.5 or GetBlendedEasing(t, easeIdx1, easeIdx2)
+            local curEx = miniX + i
+            local curEy = (miniY + miniSize) - (val * miniSize)
+            
+            if curEy < miniY then curEy = miniY end
+            if curEy > (miniY + miniSize) then curEy = miniY + miniSize end
+
+            if prevEx then
+                draw.Line(prevEx, prevEy, curEx, curEy, Color3.new(0, 1, 1), 1, 255)
             end
+            prevEx, prevEy = curEx, curEy
         end
     end
 end
@@ -1021,15 +1284,15 @@ end
 local function OnPaintWrapper() 
     if not IsScriptActive then return end
     pcall(SafeDrawGraph) 
-    pcall(DrawTimelineGraph)
     pcall(DrawOverlayFOV) 
     pcall(DrawDebugHUD)
     pcall(DrawActiveRecoilLine)
+    pcall(DrawKeyframeEditor)
 end
 cheat.register("onPaint", OnPaintWrapper)
 
 -- ==============================================================================
--- 6. ENGINE & LOGIC
+-- 8. ENGINE & LOGIC
 -- ==============================================================================
 local function IsMappedKeyPressed(dropIndex)
     local name = KeyNames[dropIndex + 1]
@@ -1039,12 +1302,14 @@ local function IsMappedKeyPressed(dropIndex)
     return keyboard.IsPressed(code)
 end
 
+-- Calculates distance from screen center to the closest edge of a bounding box
 local function GetDistanceToBox(cx, cy, x, y, w, h)
     local closestX = math.max(x, math.min(cx, x + w))
     local closestY = math.max(y, math.min(cy, y + h))
     return math.sqrt((closestX - cx)^2 + (closestY - cy)^2)
 end
 
+-- Checks both real players and dynamic PVE Targets precisely inside the FOV
 local function GetTargetInFOV(radius)
     local w, h = ScreenSize.w, ScreenSize.h
     if w == 0 then updateScreenSize(); w = ScreenSize.w; h = ScreenSize.h end
@@ -1054,10 +1319,11 @@ local function GetTargetInFOV(radius)
     local bestTargetName = nil
     local found = false
     
-    local success, enemies = pcall(function() return entity.GetPlayers(true) end)
-    if success and enemies then
-        for _, player in ipairs(enemies) do
-            if player.IsAlive and player.IsVisible then
+    -- 1. Check PvP Real Players (Using Bounding Box edges instead of center for low FOV accuracy)
+    local players = entity.GetPlayers()
+    if players then
+        for _, player in ipairs(players) do
+            if player.IsAlive and (player.Health > 0) and player.IsVisible and player.IsEnemy then
                 local bbox = player.BoundingBox
                 if bbox then
                     local dist = GetDistanceToBox(cx, cy, bbox.x, bbox.y, bbox.w, bbox.h)
@@ -1071,100 +1337,109 @@ local function GetTargetInFOV(radius)
         end
     end
 
-    return found, bestTargetName
-end
+    -- 2. Check PVE Warehouse Targets
+    -- Validate if the cached menu still exists
+    if PVE_CACHE.ClosestMenu then
+        local success, parent = pcall(function() return PVE_CACHE.ClosestMenu.Parent end)
+        if not success or parent == nil then
+            PVE_CACHE.ClosestMenu = nil
+            UpdatePVECache(true) -- Force update immediately
+        end
+    end
 
-local function GetMagnetTargetPosition(radius)
-    local w, h = ScreenSize.w, ScreenSize.h
-    if w == 0 then updateScreenSize(); w = ScreenSize.w; h = ScreenSize.h end
-    local cx, cy = w/2, h/2
-    
-    local closestDist = radius
-    local bestX, bestY = nil, nil
-    
-    local success, enemies = pcall(function() return entity.GetPlayers(true) end)
-    if success and enemies then
-        local aimPart = ui.getValue(kUiTab, kUiMagnet, "Aim Part") or 0
-        
-        for _, player in ipairs(enemies) do
-            if player.IsAlive and player.IsVisible then
-                local bbox = player.BoundingBox
-                if bbox then
-                    local targetX = bbox.x + (bbox.w / 2)
-                    local targetY = bbox.y + (bbox.h / 2)
-                    
-                    if aimPart == 0 then
-                        targetY = bbox.y + (bbox.h * 0.1)
-                    elseif aimPart == 1 then
-                        targetY = bbox.y + (bbox.h * 0.25)
-                    end
-                    
-                    local dist = math.sqrt((targetX - cx)^2 + (targetY - cy)^2)
-                    if dist <= closestDist then
-                        closestDist = dist
-                        bestX, bestY = targetX, targetY
+    -- Dynamically iterate targets and project 3D bounds to 2D screen box
+    if PVE_CACHE.ClosestMenu then
+        local menuChildren = PVE_CACHE.ClosestMenu:GetChildren()
+        for i = 1, #menuChildren do
+            local item = menuChildren[i]
+            if item.Name == "Target" and item.ClassName == "Model" then
+                local tPart = item:FindFirstChildOfClass("UnionOperation") or item:FindFirstChildOfClass("BasePart")
+                if tPart then
+                    local corners = draw.GetPartCorners(tPart)
+                    if corners then
+                        local minX, minY = math.huge, math.huge
+                        local maxX, maxY = -math.huge, -math.huge
+                        local validCorners = 0
+                        
+                        for _, corner3D in ipairs(corners) do
+                            local sx, sy, onScreen = utility.WorldToScreen(corner3D)
+                            if onScreen then
+                                if sx < minX then minX = sx end
+                                if sy < minY then minY = sy end
+                                if sx > maxX then maxX = sx end
+                                if sy > maxY then maxY = sy end
+                                validCorners = validCorners + 1
+                            end
+                        end
+                        
+                        if validCorners > 0 then
+                            local boxW, boxH = maxX - minX, maxY - minY
+                            local dist = GetDistanceToBox(cx, cy, minX, minY, boxW, boxH)
+                            if dist <= closestDist then
+                                closestDist = dist
+                                bestTargetName = "Warehouse Target"
+                                found = true
+                            end
+                        end
                     end
                 end
             end
         end
     end
-    
-    return bestX, bestY
-end
 
-local function UpdateLocalCache()
-    local s1, idx = pcall(entity.GetLocalPlayer)
-    if s1 and idx then GlobalCache.LocalPlayerIndex = idx end
-    
-    local s2, lp = pcall(function() return game.LocalPlayer end)
-    if s2 and lp then
-        local s3, char = pcall(function() return lp.Character end)
-        if s3 and char and char.Parent then
-            GlobalCache.LocalCharacter = char
-        else
-            GlobalCache.LocalCharacter = nil
-        end
-    else
-        print("[UniversalRC] Error: Could not access game.LocalPlayer to cache character.")
-    end
-end
-
-local function CheckActiveTool()
-    UpdateLocalCache()
-    
-    local s1, lp_ent = pcall(function() return entity.get_local_player() end)
-    if s1 and type(lp_ent) == "table" and lp_ent.Weapon then
-        local wpn = lp_ent.Weapon
-        if wpn ~= "" and wpn ~= "None" then
-            return true, wpn
-        end
-    end
-
-    if GlobalCache.LocalCharacter then
-        local s2, tool = pcall(function() return GlobalCache.LocalCharacter:FindFirstChildOfClass("Tool") end)
-        if s2 and tool then
-            return true, tool.Name
-        end
-    end
-    
-    return false, "None"
+    return found, bestTargetName
 end
 
 cheat.register("onUpdate", function()
     if not IsScriptActive then return end
 
+    -- F5 Keybind Logic
+    local f5_pressed = keyboard.IsPressed(116)
+    if f5_pressed and not f5_was_pressed then
+        local s, kf_enabled = pcall(ui.getValue, kUiTab, kUiMisc, "Enable Keyframing")
+        if s and kf_enabled then
+            isKeyframeEditorOpen = not isKeyframeEditorOpen
+        end
+    end
+    f5_was_pressed = f5_pressed
+
+    -- Triggers the PVE cache check (handles its own 2000ms delay internally)
+    UpdatePVECache()
+
+    local useDefaultConfigUI = ui.getValue(kUiTab, kUiMisc, "Fallback to Default Config")
+    if useDefaultConfigUI ~= nil and useDefaultConfigUI ~= MasterSettings.UseDefaultConfig then
+        MasterSettings.UseDefaultConfig = useDefaultConfigUI
+        SaveMasterSettings()
+    end
+
+    DebugState.Weapon = lastDetectedWeapon or "None"
     DebugState.Config = ui.getValue(kUiTab, kUiMisc, "Config Name") or "None"
     DebugState.Firing = isFiring
     DebugState.AccX = moveAccumulatorX
     DebugState.AccY = moveAccumulatorY
+    DebugState.ToolValid = true
+    DebugState.TargetFOV = true 
     
-    local isToolValid, toolName = CheckActiveTool()
-    DebugState.Weapon = toolName
+    local hasAmmoCheck = ui.getValue(kUiTab, kUiMisc, "Unloaded Ammo Check")
+    local hasAmmo, ammoStr = true, "N/A"
+    if game.PlaceID == OPERATION_ONE_PLACE_ID and lastDetectedWeapon then
+        hasAmmo, ammoStr = GetWeaponAmmo(lastDetectedWeapon, lastDetectedSlot)
+    end
+    DebugState.AmmoInfo = ammoStr
+
+    local linkedToolsStr = ""
+    for w, c in pairs(WeaponLinks) do
+        if c == DebugState.Config then
+            linkedToolsStr = linkedToolsStr == "" and w or (linkedToolsStr .. ", " .. w)
+        end
+    end
+    DebugState.LinkedTools = linkedToolsStr == "" and "None" or linkedToolsStr
 
     if utility.GetMenuState() then
         isFiring = false
         DebugState.Firing = false
         
+        -- UI Visibility Engine
         local isPrecision = ui.getValue(kUiTab, kUiMain, "Precision Mode (1/10)")
         pcall(ui.setVisibility, kUiTab, kUiMain, "Smoothness", not isPrecision)
 
@@ -1184,46 +1459,9 @@ cheat.register("onUpdate", function()
         pcall(ui.setVisibility, kUiTab, kUiMisc, "Graph Pos X", showGraph)
         pcall(ui.setVisibility, kUiTab, kUiMisc, "Graph Pos Y", showGraph)
 
-        local targetCheck = ui.getValue(kUiTab, kUiMisc, "Target Check (FOV)")
-        local showFov = ui.getValue(kUiTab, kUiMisc, "Visualize FOV")
-        
-        pcall(ui.setVisibility, kUiTab, kUiMisc, "Target FOV", targetCheck)
-        pcall(ui.setVisibility, kUiTab, kUiMisc, "Visualize FOV", targetCheck)
-        pcall(ui.setVisibility, kUiTab, kUiMisc, "Target FOV Color", targetCheck and showFov)
-        
-        local magnetCheck = ui.getValue(kUiTab, kUiMagnet, "Enable Magnet Recoil")
-        local magShowFov = ui.getValue(kUiTab, kUiMagnet, "Visualize Magnet FOV")
-        
-        pcall(ui.setVisibility, kUiTab, kUiMagnet, "Aim Part", magnetCheck)
-        pcall(ui.setVisibility, kUiTab, kUiMagnet, "Visualize Magnet FOV", magnetCheck)
-        pcall(ui.setVisibility, kUiTab, kUiMagnet, "Magnet FOV Color", magnetCheck and magShowFov)
-        pcall(ui.setVisibility, kUiTab, kUiMagnet, "Magnet FOV", magnetCheck)
-        pcall(ui.setVisibility, kUiTab, kUiMagnet, "Magnet Strength", magnetCheck)
-        pcall(ui.setVisibility, kUiTab, kUiMagnet, "Magnet Smoothness", magnetCheck)
-        
-        local kfCheck = ui.getValue(kUiTabKF, kUiKFMain, "Enable Keyframing")
-        local showTimeline = ui.getValue(kUiTabKF, kUiKFMain, "Show Timeline Graph")
-        
-        pcall(ui.setVisibility, kUiTabKF, kUiKFMain, "Show Timeline Graph", kfCheck)
-        pcall(ui.setVisibility, kUiTabKF, kUiKFMain, "Graph Pos X", kfCheck and showTimeline)
-        pcall(ui.setVisibility, kUiTabKF, kUiKFMain, "Graph Pos Y", kfCheck and showTimeline)
-        pcall(ui.setVisibility, kUiTabKF, kUiKFMain, "Visualize Keyframe Nodes", kfCheck)
-        pcall(ui.setVisibility, kUiTabKF, kUiKFMain, "Master Scale X (%)", kfCheck)
-        pcall(ui.setVisibility, kUiTabKF, kUiKFMain, "Master Scale Y (%)", kfCheck)
-        pcall(ui.setVisibility, kUiTabKF, kUiKFMain, "Active Keyframes", kfCheck)
-        
-        local activeKFs = ui.getValue(kUiTabKF, kUiKFMain, "Active Keyframes") or 1
-        for i = 1, 10 do
-            local isVisible = kfCheck and (i <= activeKFs)
-            pcall(ui.setVisibility, kUiTabKF, kUiKFPoints, "KF"..i.." Time (ms)", isVisible)
-            pcall(ui.setVisibility, kUiTabKF, kUiKFPoints, "KF"..i.." Recoil X", isVisible)
-            pcall(ui.setVisibility, kUiTabKF, kUiKFPoints, "KF"..i.." Recoil Y", isVisible)
-            pcall(ui.setVisibility, kUiTabKF, kUiKFPoints, "KF"..i.." Curve Type", isVisible)
-            
-            local interp = ui.getValue(kUiTabKF, kUiKFPoints, "KF"..i.." Curve Type") or 0
-            local showTension = isVisible and (interp == 1 or interp == 3 or interp == 4 or interp == 5)
-            pcall(ui.setVisibility, kUiTabKF, kUiKFPoints, "KF"..i.." Tension", showTension)
-        end
+        local isTargetCheckEnabled = ui.getValue(kUiTab, kUiMisc, "Target Check (FOV)")
+        pcall(ui.setVisibility, kUiTab, kUiMisc, "Visualize FOV", isTargetCheckEnabled)
+        pcall(ui.setVisibility, kUiTab, kUiMisc, "Target FOV", isTargetCheckEnabled)
         
         local isDebug = ui.getValue(kUiTab, kUiMisc, "Debug")
         pcall(ui.setVisibility, kUiTab, kUiMisc, "Console Messages", isDebug)
@@ -1238,11 +1476,41 @@ cheat.register("onUpdate", function()
                 if name and name ~= "None" then
                     ui.setValue(kUiTab, kUiMisc, "Config Name", name)
                     LoadConfigData(name)
-                    DebugPrint("[Universal] Loaded config via UI: " .. name)
+                    DebugPrint("[OpOne] Loaded config via UI: " .. name)
                 end
             end
         end
         return 
+    end
+
+    if game.PlaceID == OPERATION_ONE_PLACE_ID then
+        if not hasDetectedGame then
+            hasDetectedGame = true
+        end
+        
+        ScanAmmoLabels() 
+        
+        local currentOpOneWeaponInstance, currentOpOneWeapon, currentSlot = GetCurrentOperationOneWeapon()
+        if currentOpOneWeapon ~= lastDetectedWeapon then
+            lastDetectedWeaponInstance = currentOpOneWeaponInstance
+            lastDetectedWeapon = currentOpOneWeapon
+            lastDetectedSlot = currentSlot
+            
+            if currentOpOneWeapon and WeaponLinks[currentOpOneWeapon] then
+                LoadConfigData(WeaponLinks[currentOpOneWeapon])
+                DebugPrint("[OpOne] Loaded config '" .. WeaponLinks[currentOpOneWeapon] .. "' by linked weapon: " .. currentOpOneWeapon)
+            else
+                if MasterSettings.UseDefaultConfig then
+                    local defConfig = MasterSettings.DefaultConfigName
+                    if defConfig and AllConfigs[defConfig] then
+                        LoadConfigData(defConfig)
+                        DebugPrint("[OpOne] Fallback loaded config: " .. defConfig)
+                    end
+                end
+            end
+        else
+            lastDetectedWeaponInstance = currentOpOneWeaponInstance
+        end
     end
 
     if not (ui.getValue(kUiTab, kUiMisc, "Enable Recoil Macro") or false) then 
@@ -1268,13 +1536,29 @@ cheat.register("onUpdate", function()
     lastInputState = inputActive
 
     if finalActive and ui.getValue(kUiTab, kUiMisc, "Tool Check") then
-        DebugState.ToolValid = isToolValid
-        if not isToolValid then 
+        local isHoldingValidTool = false
+
+        if game.PlaceID == OPERATION_ONE_PLACE_ID then
+            local opOneWpn = GetCurrentOperationOneWeapon()
+            isHoldingValidTool = (opOneWpn ~= nil)
+        else
+            if game.LocalPlayer and game.LocalPlayer.Character then
+                isHoldingValidTool = game.LocalPlayer.Character:FindFirstChildOfClass("Tool") ~= nil
+            else 
+                isHoldingValidTool = true 
+            end
+        end
+        
+        DebugState.ToolValid = isHoldingValidTool
+        if not isHoldingValidTool then 
             finalActive = false
             isFiring = false 
         end
-    else
-        DebugState.ToolValid = true
+    end
+    
+    if finalActive and hasAmmoCheck and not hasAmmo then
+        finalActive = false
+        isFiring = false
     end
     
     local isTargetCheckEnabled = ui.getValue(kUiTab, kUiMisc, "Target Check (FOV)")
@@ -1308,62 +1592,30 @@ cheat.register("onUpdate", function()
         
         if currentTick - lastTick >= delay then
             lastTick = currentTick
-            
+            local rX = ui.getValue(kUiTab, kUiMain, "Recoil X") or 0
+            local rY = ui.getValue(kUiTab, kUiMain, "Recoil Y") or 0
             local smooth = ui.getValue(kUiTab, kUiMain, "Smoothness") or 1
             local easeIdx1 = ui.getValue(kUiTab, kUiMain, "Primary Easing") or 0
             local easeIdx2 = ui.getValue(kUiTab, kUiMain, "Secondary Easing") or 0
             local easingTime = ui.getValue(kUiTab, kUiMain, "Easing Time (ms)") or 1000
             
-            local elapsed = currentTick - sprayStartTime
-            local t = elapsed / easingTime
+            local t = (currentTick - sprayStartTime) / easingTime
             if t > 1.0 then t = 1.0 end
             
-            local kfCheck = ui.getValue(kUiTabKF, kUiKFMain, "Enable Keyframing")
-            
-            local mult = 1.0
-            if not kfCheck then
+            -- Evaluate multiplier (Uses Keyframe cache dynamically if enabled)
+            local mult
+            local kf_enabled = ui.getValue(kUiTab, kUiMisc, "Enable Keyframing")
+            local current_cfg = DebugState.Config
+            if kf_enabled and current_cfg and current_cfg ~= "None" and KeyframeCache[current_cfg] then
+                mult = EvaluateCurve(t, KeyframeCache[current_cfg])
+            else
                 mult = GetBlendedEasing(t, easeIdx1, easeIdx2)
             end
             
             local baseFactor = ui.getValue(kUiTab, kUiMain, "Precision Mode (1/10)") and 10 or 1
             
-            local curRx, curRy = GetCurrentRecoil(elapsed)
-            
-            local stepX = (curRx / baseFactor / smooth) * mult
-            local stepY = (curRy / baseFactor / smooth) * mult
-            
-            local isMagnetEnabled = ui.getValue(kUiTab, kUiMagnet, "Enable Magnet Recoil")
-            if isMagnetEnabled then
-                local magFov = ui.getValue(kUiTab, kUiMagnet, "Magnet FOV") or 100
-                local targetX, targetY = GetMagnetTargetPosition(magFov)
-                
-                if targetX and targetY then
-                    local cx, cy = ScreenSize.w / 2, ScreenSize.h / 2
-                    local dx = targetX - cx
-                    local dy = targetY - cy
-                    local dist = math.sqrt(dx^2 + dy^2)
-                    
-                    if dist > 2.0 then
-                        local mStr = ui.getValue(kUiTab, kUiMagnet, "Magnet Strength") or 10
-                        local mSmooth = ui.getValue(kUiTab, kUiMagnet, "Magnet Smoothness") or 10
-                        
-                        local influence = math.max(0.0, math.min(1.0, dist / magFov))
-                        local humanCurve = math.pow(influence, 0.6) 
-                        
-                        local pullMulti = (mStr / 15.0) * humanCurve
-                        
-                        local magStepX = (dx / mSmooth) * pullMulti
-                        local magStepY = (dy / mSmooth) * pullMulti
-                        
-                        local maxPxPerTick = 3.0 + (mStr / 5.0)
-                        magStepX = math.max(-maxPxPerTick, math.min(maxPxPerTick, magStepX))
-                        magStepY = math.max(-maxPxPerTick, math.min(maxPxPerTick, magStepY))
-                        
-                        stepX = stepX + magStepX
-                        stepY = stepY + magStepY
-                    end
-                end
-            end
+            local stepX = (rX / baseFactor / smooth) * mult
+            local stepY = (rY / baseFactor / smooth) * mult
             
             local randPerc = ui.getValue(kUiTab, kUiMain, "Randomizer %") or 0
             if randPerc > 0 then
@@ -1396,3 +1648,4 @@ cheat.register("onUpdate", function()
     
     DebugState.Firing = isFiring
 end)
+```
