@@ -1,6 +1,3 @@
--- ==============================================================================
--- 1. INITIALIZATION & GAME VERIFICATION
--- ==============================================================================
 local OPERATION_ONE_PLACE_ID = 72920620366355
 
 if game.PlaceID ~= OPERATION_ONE_PLACE_ID then
@@ -36,7 +33,6 @@ local DebugState = {
     SprayPath = {}
 }
 
--- PVE Cache structure for WarehouseMenu targets
 local PVE_CACHE = {
     LastUpdate = 0,
     ClosestMenu = nil
@@ -52,9 +48,6 @@ cheat.register("shutdown", function()
     PVE_CACHE.ClosestMenu = nil
 end)
 
--- ==============================================================================
--- 2. GLOBAL VARIABLES & UTILITIES
--- ==============================================================================
 local kUiTab = "Macro"
 local kUiMain = "Settings"        
 local kUiMisc = "Miscellaneous"   
@@ -176,10 +169,6 @@ local function DebugPrint(msg)
         print(msg)
     end
 end
-
--- ==============================================================================
--- 3. CONFIGURATION MANAGEMENT (SAVE/LOAD/SHARE)
--- ==============================================================================
 
 local function UpdateConfigNames()
     for k in pairs(ConfigNames) do ConfigNames[k] = nil end
@@ -406,10 +395,6 @@ LoadFromFile()
 LoadWeaponLinks()
 LoadMasterSettings()
 
--- ==============================================================================
--- 4. GAME SPECIFIC LOGIC (WEAPON, AMMO & PVE CACHE)
--- ==============================================================================
-
 local function GetCurrentOperationOneWeapon()
     if game.PlaceID ~= OPERATION_ONE_PLACE_ID then return nil, nil, nil end
     local viewmodels = game.Workspace:FindFirstChild("Viewmodels")
@@ -419,12 +404,18 @@ local function GetCurrentOperationOneWeapon()
         local children = localViewmodel:GetChildren()
         for i = 1, #children do
             local item = children[i]
-            if item.ClassName == "Model" then
-                local keyAttr = item:GetAttribute("key")
-                if keyAttr and type(keyAttr.Value) == "string" then
-                    if keyAttr.Value == "primary" or keyAttr.Value == "secondary" then
-                        return item, item.Name, keyAttr.Value 
+            if item.Name ~= "Model" then
+                if item:FindFirstChild("Throwable") then
+                    return nil, nil, nil
+                elseif item:FindFirstChild("Gun") then
+                    local slotName = nil
+                    local keyAttr = item:GetAttribute("key")
+                    if keyAttr and type(keyAttr.Value) == "string" then
+                        if keyAttr.Value == "primary" or keyAttr.Value == "secondary" then
+                            slotName = keyAttr.Value
+                        end
                     end
+                    return item, item.Name, slotName
                 end
             end
         end
@@ -437,7 +428,7 @@ local function ScanAmmoLabels()
     if currentTick - lastScanTime < 1000 then return end 
     lastScanTime = currentTick
 
-    local lp = game.LocalPlayer
+    local lp = game:GetService("Players").LocalPlayer
     if not lp then return end
     
     local pGui = lp:FindFirstChild("PlayerGui")
@@ -470,10 +461,10 @@ local function ScanAmmoLabels()
             end
             
             if isWeaponSlot then
-                local itemObjVal = itemFrame:FindFirstChild("Item")
                 local infoLabel = itemFrame:FindFirstChild("InfoLabel")
+                local itemObjVal = itemFrame:FindFirstChild("Item")
                 
-                if itemObjVal and infoLabel then
+                if infoLabel and itemObjVal and itemObjVal.Value then
                     local wInst = itemObjVal.Value
                     if wInst and wInst.Name then
                         local wName = wInst.Name
@@ -497,7 +488,7 @@ end
 
 local function GetWeaponAmmo(weaponName, slotName)
     local label = AmmoInstancesCache[weaponName] or AmmoInstancesCache[slotName]
-    if not label then return true, "N/A" end 
+    if not label then return true, "N/A", slotName end 
     
     local success, text = pcall(function() return label.Text end)
     if not success or type(text) ~= "string" then
@@ -508,13 +499,12 @@ local function GetWeaponAmmo(weaponName, slotName)
         local currentAmmoStr = string.match(text, "^%s*(%d+)%s*/")
         if currentAmmoStr then
             local currentAmmo = tonumber(currentAmmoStr)
-            return (currentAmmo > 0), text
+            return (currentAmmo > 0), text, slotName
         end
     end
-    return true, "Err"
+    return true, "Err", slotName
 end
 
--- Dynamically finds and caches the nearest WarehouseMenu
 local function UpdatePVECache(forceUpdate)
     local currentTick = utility.GetTickCount()
     if not forceUpdate and (currentTick - PVE_CACHE.LastUpdate < 2000) then return end
@@ -559,10 +549,6 @@ local function UpdatePVECache(forceUpdate)
         PVE_CACHE.ClosestMenu = nil
     end
 end
-
--- ==============================================================================
--- 5. USER INTERFACE (MENU)
--- ==============================================================================
 
 ui.newTab(kUiTab, kUiTab)
 
@@ -708,12 +694,8 @@ ui.newButton(kUiTab, kUiMisc, "Set Default Config", function()
     DebugPrint("[OpOne] Default Fallback Config set to: " .. defName)
 end)
 
--- Keyframing Toggle
 ui.newCheckbox(kUiTab, kUiMisc, "Enable Keyframing")
 
--- ==============================================================================
--- 6. KEYFRAME EDITOR SYSTEM
--- ==============================================================================
 local KeyframeCache = {}
 local isKeyframeEditorOpen = false
 local f5_was_pressed = false
@@ -722,8 +704,9 @@ local KF_DragPoint = nil
 local KF_DragSlider = nil
 local KF_ButtonLatch = false
 
-local KF_Win1 = {x = 300, y = 200, w = 500, h = 300, dragging = false, dx = 0, dy = 0}
-local KF_Win2 = {x = 820, y = 200, w = 200, h = 300, dragging = false, dx = 0, dy = 0}
+local KF_Win1 = {x = 300, y = 200, w = 500, h = 400, dragging = false, dx = 0, dy = 0}
+local KF_Win2 = {x = 820, y = 200, w = 200, h = 400, dragging = false, dx = 0, dy = 0}
+local KF_Win3 = {x = 300, y = 620, w = 500, h = 150, dragging = false, dx = 0, dy = 0}
 
 local function SaveKeyframes()
     local content = ""
@@ -733,7 +716,9 @@ local function SaveKeyframes()
         content = content .. "smoothing=" .. tostring(data.smoothing) .. "\n"
         local pts_str = {}
         for _, p in ipairs(data.points) do
-            table.insert(pts_str, tostring(p.t) .. "," .. tostring(p.v))
+            local hLx, hLy = p.hL and p.hL.x or 0, p.hL and p.hL.y or 0
+            local hRx, hRy = p.hR and p.hR.x or 0, p.hR and p.hR.y or 0
+            table.insert(pts_str, tostring(p.x) .. "," .. tostring(p.y) .. "," .. tostring(hLx) .. "," .. tostring(hLy) .. "," .. tostring(hRx) .. "," .. tostring(hRy))
         end
         content = content .. "points=" .. table.concat(pts_str, ";") .. "\n\n"
     end
@@ -756,8 +741,14 @@ local function LoadKeyframes()
             elseif k == "points" then
                 local pts = {}
                 for pt_str in string.gmatch(v, "([^;]+)") do
-                    local pt, pv = string.match(pt_str, "(.-),(.-)$")
-                    if pt and pv then table.insert(pts, {t=tonumber(pt), v=tonumber(pv)}) end
+                    local px, py, hLx, hLy, hRx, hRy = string.match(pt_str, "(.-),(.-),(.-),(.-),(.-),(.-)$")
+                    if px and py then 
+                        table.insert(pts, {
+                            x=tonumber(px) or 0, y=tonumber(py) or 0, 
+                            hL={x=tonumber(hLx) or 0, y=tonumber(hLy) or 0}, 
+                            hR={x=tonumber(hRx) or 0, y=tonumber(hRy) or 0}
+                        }) 
+                    end
                 end
                 KeyframeCache[current_cfg].points = pts
             end
@@ -769,7 +760,14 @@ LoadKeyframes()
 local function GetOrCreateKFData(cfgName)
     if not cfgName or cfgName == "None" then return nil end
     if not KeyframeCache[cfgName] then
-        KeyframeCache[cfgName] = {points = {{t=0, v=0}, {t=1, v=1}}, count = 2, smoothing = 0.5}
+        KeyframeCache[cfgName] = {
+            points = {
+                {x=0, y=0, hL={x=-5,y=0}, hR={x=5,y=0}}, 
+                {x=10, y=10, hL={x=5,y=10}, hR={x=15,y=10}}
+            }, 
+            count = 2, 
+            smoothing = 0.5
+        }
         SaveKeyframes()
     end
     return KeyframeCache[cfgName]
@@ -782,61 +780,21 @@ local function SetKeyframeCount(cfgName, count)
     local new_points = {}
     for i=1, count do
         local t = (i-1)/(count-1)
-        local v = 0
-        -- try to preserve existing shape
+        local x = 0
+        local y = 0
         if #data.points > 0 then
             local closest = data.points[1]
             for _, p in ipairs(data.points) do
-                if math.abs(p.t - t) < math.abs(closest.t - t) then closest = p end
+                if math.abs(p.x - x) < math.abs(closest.x - x) then closest = p end
             end
-            v = closest.v
+            x = closest.x
+            y = closest.y
         end
-        table.insert(new_points, {t = t, v = v})
+        table.insert(new_points, {x = x, y = y, hL = {x = x - 5, y = y}, hR = {x = x + 5, y = y}})
     end
     data.points = new_points
     data.count = count
     SaveKeyframes()
-end
-
-local function EvaluateCurve(t, data)
-    if not data or #data.points < 2 then return 1.0 end
-    t = math.max(0, math.min(1, t))
-    local p1, p2
-    for i=1, #data.points-1 do
-        if data.points[i].t <= t and data.points[i+1].t >= t then
-            p1 = data.points[i]
-            p2 = data.points[i+1]
-            break
-        end
-    end
-    if not p1 then
-        if t <= data.points[1].t then return data.points[1].v end
-        return data.points[#data.points].v
-    end
-    
-    local lt = (t - p1.t) / (p2.t - p1.t)
-    local linear_v = p1.v + (p2.v - p1.v) * lt
-    
-    -- Simple Catmull-Rom for Bezier-like smoothing
-    local p0 = data.points[1]
-    local p3 = data.points[#data.points]
-    for i=1, #data.points-1 do
-        if data.points[i].t <= p1.t and data.points[i+1].t >= p1.t then
-            p0 = data.points[i] or p1
-            p3 = data.points[i+2] or p2
-            break
-        end
-    end
-    
-    local catmull_v = 0.5 * (
-        (2 * p1.v) +
-        (-p0.v + p2.v) * lt +
-        (2*p0.v - 5*p1.v + 4*p2.v - p3.v) * lt^2 +
-        (-p0.v + 3*p1.v - 3*p2.v + p3.v) * lt^3
-    )
-    
-    local smooth = data.smoothing or 0
-    return linear_v * (1 - smooth) + catmull_v * smooth
 end
 
 local function PointInRect(px, py, rx, ry, rw, rh)
@@ -922,49 +880,77 @@ local function DrawKeyframeEditor()
     local data = GetOrCreateKFData(cfgName)
     if not data then return end
 
+    for _, p in ipairs(data.points) do
+        if not p.hL then p.hL = {x = p.x - 5, y = p.y} end
+        if not p.hR then p.hR = {x = p.x + 5, y = p.y} end
+    end
+
     DrawWindow(KF_Win1, "Spline Editor - " .. cfgName)
     DrawWindow(KF_Win2, "Spline & Smoothing Controls")
+    DrawWindow(KF_Win3, "Macro Builder & Recoil Value Editor")
 
     local gx, gy, gw, gh = KF_Win1.x + 20, KF_Win1.y + 40, KF_Win1.w - 40, KF_Win1.h - 60
     draw.RectFilled(gx, gy, gw, gh, Color3.new(0.05, 0.05, 0.05), 0, 255)
     draw.Rect(gx, gy, gw, gh, Color3.new(0.3, 0.3, 0.3), 1, 0, 255)
-    draw.Line(gx, gy + gh/2, gx + gw, gy + gh/2, Color3.new(0.2, 0.2, 0.2), 1, 100)
+    
+    local cx = gx + gw / 2
+    local cy = gy + gh / 2
+    draw.Line(gx, cy, gx + gw, cy, Color3.new(0.2, 0.2, 0.2), 1, 100)
+    draw.Line(cx, gy, cx, gy + gh, Color3.new(0.2, 0.2, 0.2), 1, 100)
 
     local mp = utility.GetMousePos()
     local mx, my = mp[1], mp[2]
     local is_lmb = keyboard.IsPressed(1)
-    local shift_down = keyboard.IsPressed(16) -- Shift
+    local shift_down = keyboard.IsPressed(16)
 
-    -- Curve Drawing
-    local prev_sx, prev_sy
-    for i=0, 1, 0.02 do
-        local v = EvaluateCurve(i, data)
-        local sx = gx + (i * gw)
-        local sy = gy + gh - (v * gh)
-        if prev_sx then
-            draw.Line(prev_sx, prev_sy, sx, sy, Color3.new(0, 1, 1), 2, 255)
-        end
-        prev_sx, prev_sy = sx, sy
+    local function G2S(px, py)
+        local sx = cx + (px / 80) * (gw / 2)
+        local sy = cy - (py / 80) * (gh / 2)
+        return sx, sy
     end
 
-    -- Point Interaction
+    local function S2G(sx, sy)
+        local px = ((sx - cx) / (gw / 2)) * 80
+        local py = ((cy - sy) / (gh / 2)) * 80
+        return px, py
+    end
+
+    for i = 1, #data.points - 1 do
+        local p0 = data.points[i]
+        local p3 = data.points[i+1]
+        local p1 = p0.hR
+        local p2 = p3.hL
+        local prev_sx, prev_sy = G2S(p0.x, p0.y)
+        for t = 0, 1, 0.05 do
+            local u = 1 - t
+            local bx = u^3 * p0.x + 3 * u^2 * t * p1.x + 3 * u * t^2 * p2.x + t^3 * p3.x
+            local by = u^3 * p0.y + 3 * u^2 * t * p1.y + 3 * u * t^2 * p2.y + t^3 * p3.y
+            local nsx, nsy = G2S(bx, by)
+            draw.Line(prev_sx, prev_sy, nsx, nsy, Color3.new(0, 1, 1), 2, 255)
+            prev_sx, prev_sy = nsx, nsy
+        end
+    end
+
     local clicked_this_frame = false
     if is_lmb and not KF_DragSlider and PointInRect(mx, my, gx-10, gy-10, gw+20, gh+20) then
         if not KF_DragPoint then
             for i, p in ipairs(data.points) do
-                local px = gx + (p.t * gw)
-                local py = gy + gh - (p.v * gh)
+                local px, py = G2S(p.x, p.y)
                 if math.abs(mx - px) < 8 and math.abs(my - py) < 8 then
-                    KF_DragPoint = i
-                    if not shift_down then
-                        SelectedKFPoints = {i}
-                    else
-                        local found = false
-                        for idx, sel in ipairs(SelectedKFPoints) do
-                            if sel == i then table.remove(SelectedKFPoints, idx); found = true; break end
-                        end
-                        if not found then table.insert(SelectedKFPoints, i) end
-                    end
+                    KF_DragPoint = {type = "point", idx = i}
+                    if not shift_down then SelectedKFPoints = {i} end
+                    clicked_this_frame = true
+                    break
+                end
+                local hLx, hLy = G2S(p.hL.x, p.hL.y)
+                if math.abs(mx - hLx) < 6 and math.abs(my - hLy) < 6 then
+                    KF_DragPoint = {type = "hL", idx = i}
+                    clicked_this_frame = true
+                    break
+                end
+                local hRx, hRy = G2S(p.hR.x, p.hR.y)
+                if math.abs(mx - hRx) < 6 and math.abs(my - hRy) < 6 then
+                    KF_DragPoint = {type = "hR", idx = i}
                     clicked_this_frame = true
                     break
                 end
@@ -981,76 +967,105 @@ local function DrawKeyframeEditor()
     end
 
     for i, p in ipairs(data.points) do
-        local px = gx + (p.t * gw)
-        local py = gy + gh - (p.v * gh)
-        
         local is_selected = false
         for _, sel in ipairs(SelectedKFPoints) do if sel == i then is_selected = true; break end end
 
+        local px, py = G2S(p.x, p.y)
+        local hLx, hLy = G2S(p.hL.x, p.hL.y)
+        local hRx, hRy = G2S(p.hR.x, p.hR.y)
+
+        if is_selected then
+            draw.Line(px, py, hLx, hLy, Color3.new(0.5, 0.5, 0.5), 1, 200)
+            draw.Line(px, py, hRx, hRy, Color3.new(0.5, 0.5, 0.5), 1, 200)
+            draw.CircleFilled(hLx, hLy, 4, Color3.new(1, 0.5, 0), 6, 255)
+            draw.CircleFilled(hRx, hRy, 4, Color3.new(1, 0.5, 0), 6, 255)
+        end
+
         local color = is_selected and Color3.new(1, 1, 0) or Color3.new(1, 1, 1)
-        if KF_DragPoint == i then color = Color3.new(0, 1, 0) end
-        
         draw.CircleFilled(px, py, 5, color, 6, 255)
-        
-        if KF_DragPoint == i or (is_selected and KF_DragPoint) then
-            local new_t = (mx - gx) / gw
-            local new_v = 1 - (my - gy) / gh
-            
-            if #SelectedKFPoints <= 1 then
-                local prev_t = i > 1 and data.points[i-1].t or 0
-                local next_t = i < #data.points and data.points[i+1].t or 1
-                p.t = math.max(prev_t, math.min(next_t, new_t))
+
+        if KF_DragPoint and KF_DragPoint.idx == i then
+            local ngx, ngy = S2G(mx, my)
+            if KF_DragPoint.type == "point" then
+                local dx = ngx - p.x
+                local dy = ngy - p.y
+                p.x = ngx
+                p.y = ngy
+                p.hL.x = p.hL.x + dx
+                p.hL.y = p.hL.y + dy
+                p.hR.x = p.hR.x + dx
+                p.hR.y = p.hR.y + dy
+            elseif KF_DragPoint.type == "hL" then
+                p.hL.x = ngx
+                p.hL.y = ngy
+            elseif KF_DragPoint.type == "hR" then
+                p.hR.x = ngx
+                p.hR.y = ngy
             end
-            p.v = math.max(0, math.min(1, new_v))
         end
     end
 
-    -- Controls Window
-    local cy = KF_Win2.y + 30
-    data.smoothing = DrawSlider(KF_Win2.x + 20, cy, 160, "Smoothing (Tension)", 0, 1, data.smoothing or 0)
-    cy = cy + 30
-    local new_count = DrawSlider(KF_Win2.x + 20, cy, 160, "Keyframe Count", 2, 20, data.count or 2)
-    cy = cy + 30
+    local cy2 = KF_Win2.y + 30
+    data.smoothing = DrawSlider(KF_Win2.x + 20, cy2, 160, "Smoothing (Tension)", 0, 1, data.smoothing or 0)
+    cy2 = cy2 + 30
+    local new_count = DrawSlider(KF_Win2.x + 20, cy2, 160, "Keyframe Count", 2, 20, data.count or 2)
+    cy2 = cy2 + 30
     
     if math.floor(new_count) ~= data.count then
         SetKeyframeCount(cfgName, math.floor(new_count))
     end
 
     local btn_w, btn_h = 80, 25
-    if DrawButton(KF_Win2.x + 20, cy, btn_w, btn_h, "Linear") then
+    if DrawButton(KF_Win2.x + 20, cy2, btn_w, btn_h, "Linear") then
         local pts = #SelectedKFPoints > 0 and SelectedKFPoints or (function() local t={}; for i=1,#data.points do t[i]=i end return t end)()
         for _, idx in ipairs(pts) do
-            data.points[idx].v = data.points[idx].t
+            local p = data.points[idx]
+            p.hL.x = p.x - 5; p.hL.y = p.y
+            p.hR.x = p.x + 5; p.hR.y = p.y
         end
         SaveKeyframes()
     end
-    if DrawButton(KF_Win2.x + 110, cy, btn_w, btn_h, "Ease In") then
+    if DrawButton(KF_Win2.x + 110, cy2, btn_w, btn_h, "Ease In") then
         local pts = #SelectedKFPoints > 0 and SelectedKFPoints or (function() local t={}; for i=1,#data.points do t[i]=i end return t end)()
         for _, idx in ipairs(pts) do
-            data.points[idx].v = data.points[idx].t * data.points[idx].t
+            local p = data.points[idx]
+            p.hL.x = p.x - 5; p.hL.y = p.y
+            p.hR.x = p.x + 15; p.hR.y = p.y
         end
         SaveKeyframes()
     end
-    cy = cy + 35
-    if DrawButton(KF_Win2.x + 20, cy, btn_w, btn_h, "Ease Out") then
+    cy2 = cy2 + 35
+    if DrawButton(KF_Win2.x + 20, cy2, btn_w, btn_h, "Ease Out") then
         local pts = #SelectedKFPoints > 0 and SelectedKFPoints or (function() local t={}; for i=1,#data.points do t[i]=i end return t end)()
         for _, idx in ipairs(pts) do
-            data.points[idx].v = 1 - ((1 - data.points[idx].t) * (1 - data.points[idx].t))
+            local p = data.points[idx]
+            p.hL.x = p.x - 15; p.hL.y = p.y
+            p.hR.x = p.x + 5; p.hR.y = p.y
         end
         SaveKeyframes()
     end
-    if DrawButton(KF_Win2.x + 110, cy, btn_w, btn_h, "Smooth") then
+    if DrawButton(KF_Win2.x + 110, cy2, btn_w, btn_h, "Smooth") then
         local pts = #SelectedKFPoints > 0 and SelectedKFPoints or (function() local t={}; for i=1,#data.points do t[i]=i end return t end)()
         for _, idx in ipairs(pts) do
-            data.points[idx].v = data.points[idx].t * data.points[idx].t * (3 - 2 * data.points[idx].t)
+            local p = data.points[idx]
+            p.hL.x = p.x - 15; p.hL.y = p.y
+            p.hR.x = p.x + 15; p.hR.y = p.y
         end
         SaveKeyframes()
+    end
+
+    local cy3 = KF_Win3.y + 30
+    if #SelectedKFPoints == 1 then
+        local p = data.points[SelectedKFPoints[1]]
+        p.x = DrawSlider(KF_Win3.x + 20, cy3, 200, "Recoil Control X", -80, 80, p.x)
+        cy3 = cy3 + 30
+        p.y = DrawSlider(KF_Win3.x + 20, cy3, 200, "Recoil Control Y", -80, 80, p.y)
+        if KF_DragSlider then SaveKeyframes() end
+    else
+        draw.TextOutlined("Select a single keyframe to edit values", KF_Win3.x + 20, cy3, Color3.new(1,1,1), "SmallestPixel", 255)
     end
 end
 
--- ==============================================================================
--- 7. DRAWING LOGIC (RECOIL GRAPH, FOV, DEBUG HUD & RECOIL LINE)
--- ==============================================================================
 local function DrawDebugHUD()
     if not IsScriptActive then return end
     if not ui.getValue(kUiTab, kUiMisc, "Debug") then return end
@@ -1194,7 +1209,24 @@ local function SafeDrawGraph()
             local kf_enabled = ui.getValue(kUiTab, kUiMisc, "Enable Keyframing")
             local current_cfg = DebugState.Config
             if kf_enabled and current_cfg and current_cfg ~= "None" and KeyframeCache[current_cfg] then
-                mult = EvaluateCurve(progress, KeyframeCache[current_cfg])
+                local data = KeyframeCache[current_cfg]
+                local N = #data.points
+                if N >= 2 then
+                    local seg_t = progress * (N - 1)
+                    local seg_idx = math.floor(seg_t)
+                    if seg_idx >= N - 1 then seg_idx = N - 2 end
+                    local local_t = seg_t - seg_idx
+                    local p0 = data.points[seg_idx + 1]
+                    local p3 = data.points[seg_idx + 2]
+                    local p1 = p0.hR or p0
+                    local p2 = p3.hL or p3
+                    local u = 1 - local_t
+                    local bx = u^3 * p0.x + 3 * u^2 * local_t * p1.x + 3 * u * local_t^2 * p2.x + local_t^3 * p3.x
+                    local by = u^3 * p0.y + 3 * u^2 * local_t * p1.y + 3 * u * local_t^2 * p2.y + local_t^3 * p3.y
+                    mult = math.sqrt(bx^2 + by^2)
+                else
+                    mult = GetBlendedEasing(progress, easeIdx1, easeIdx2)
+                end
             else
                 mult = GetBlendedEasing(progress, easeIdx1, easeIdx2)
             end
@@ -1288,9 +1320,6 @@ local function OnPaintWrapper()
 end
 cheat.register("onPaint", OnPaintWrapper)
 
--- ==============================================================================
--- 8. ENGINE & LOGIC
--- ==============================================================================
 local function IsMappedKeyPressed(dropIndex)
     local name = KeyNames[dropIndex + 1]
     if not name or name == "None" then return false end
@@ -1299,14 +1328,12 @@ local function IsMappedKeyPressed(dropIndex)
     return keyboard.IsPressed(code)
 end
 
--- Calculates distance from screen center to the closest edge of a bounding box
 local function GetDistanceToBox(cx, cy, x, y, w, h)
     local closestX = math.max(x, math.min(cx, x + w))
     local closestY = math.max(y, math.min(cy, y + h))
     return math.sqrt((closestX - cx)^2 + (closestY - cy)^2)
 end
 
--- Checks both real players and dynamic PVE Targets precisely inside the FOV
 local function GetTargetInFOV(radius)
     local w, h = ScreenSize.w, ScreenSize.h
     if w == 0 then updateScreenSize(); w = ScreenSize.w; h = ScreenSize.h end
@@ -1316,7 +1343,6 @@ local function GetTargetInFOV(radius)
     local bestTargetName = nil
     local found = false
     
-    -- 1. Check PvP Real Players (Using Bounding Box edges instead of center for low FOV accuracy)
     local players = entity.GetPlayers()
     if players then
         for _, player in ipairs(players) do
@@ -1334,17 +1360,14 @@ local function GetTargetInFOV(radius)
         end
     end
 
-    -- 2. Check PVE Warehouse Targets
-    -- Validate if the cached menu still exists
     if PVE_CACHE.ClosestMenu then
         local success, parent = pcall(function() return PVE_CACHE.ClosestMenu.Parent end)
         if not success or parent == nil then
             PVE_CACHE.ClosestMenu = nil
-            UpdatePVECache(true) -- Force update immediately
+            UpdatePVECache(true)
         end
     end
 
-    -- Dynamically iterate targets and project 3D bounds to 2D screen box
     if PVE_CACHE.ClosestMenu then
         local menuChildren = PVE_CACHE.ClosestMenu:GetChildren()
         for i = 1, #menuChildren do
@@ -1390,7 +1413,6 @@ end
 cheat.register("onUpdate", function()
     if not IsScriptActive then return end
 
-    -- F5 Keybind Logic
     local f5_pressed = keyboard.IsPressed(116)
     if f5_pressed and not f5_was_pressed then
         local s, kf_enabled = pcall(ui.getValue, kUiTab, kUiMisc, "Enable Keyframing")
@@ -1400,7 +1422,6 @@ cheat.register("onUpdate", function()
     end
     f5_was_pressed = f5_pressed
 
-    -- Triggers the PVE cache check (handles its own 2000ms delay internally)
     UpdatePVECache()
 
     local useDefaultConfigUI = ui.getValue(kUiTab, kUiMisc, "Fallback to Default Config")
@@ -1420,7 +1441,7 @@ cheat.register("onUpdate", function()
     local hasAmmoCheck = ui.getValue(kUiTab, kUiMisc, "Unloaded Ammo Check")
     local hasAmmo, ammoStr = true, "N/A"
     if game.PlaceID == OPERATION_ONE_PLACE_ID and lastDetectedWeapon then
-        hasAmmo, ammoStr = GetWeaponAmmo(lastDetectedWeapon, lastDetectedSlot)
+        hasAmmo, ammoStr, lastDetectedSlot = GetWeaponAmmo(lastDetectedWeapon, lastDetectedSlot)
     end
     DebugState.AmmoInfo = ammoStr
 
@@ -1436,7 +1457,6 @@ cheat.register("onUpdate", function()
         isFiring = false
         DebugState.Firing = false
         
-        -- UI Visibility Engine
         local isPrecision = ui.getValue(kUiTab, kUiMain, "Precision Mode (1/10)")
         pcall(ui.setVisibility, kUiTab, kUiMain, "Smoothness", not isPrecision)
 
@@ -1596,47 +1616,86 @@ cheat.register("onUpdate", function()
             local easeIdx2 = ui.getValue(kUiTab, kUiMain, "Secondary Easing") or 0
             local easingTime = ui.getValue(kUiTab, kUiMain, "Easing Time (ms)") or 1000
             
-            local t = (currentTick - sprayStartTime) / easingTime
-            if t > 1.0 then t = 1.0 end
-            
-            -- Evaluate multiplier (Uses Keyframe cache dynamically if enabled)
-            local mult
             local kf_enabled = ui.getValue(kUiTab, kUiMisc, "Enable Keyframing")
             local current_cfg = DebugState.Config
+            
             if kf_enabled and current_cfg and current_cfg ~= "None" and KeyframeCache[current_cfg] then
-                mult = EvaluateCurve(t, KeyframeCache[current_cfg])
+                local data = KeyframeCache[current_cfg]
+                local N = #data.points
+                if N >= 2 then
+                    local t = (currentTick - sprayStartTime) / easingTime
+                    if t > 1.0 then t = 1.0 end
+                    local seg_t = t * (N - 1)
+                    local seg_idx = math.floor(seg_t)
+                    if seg_idx >= N - 1 then seg_idx = N - 2 end
+                    local local_t = seg_t - seg_idx
+
+                    local p0 = data.points[seg_idx + 1]
+                    local p3 = data.points[seg_idx + 2]
+                    if not p0.hR then p0.hR = {x = p0.x, y = p0.y} end
+                    if not p3.hL then p3.hL = {x = p3.x, y = p3.y} end
+                    local p1 = p0.hR
+                    local p2 = p3.hL
+
+                    local u = 1 - local_t
+                    local targetX = u^3 * p0.x + 3 * u^2 * local_t * p1.x + 3 * u * local_t^2 * p2.x + local_t^3 * p3.x
+                    local targetY = u^3 * p0.y + 3 * u^2 * local_t * p1.y + 3 * u * local_t^2 * p2.y + local_t^3 * p3.y
+
+                    local stepX = targetX - moveAccumulatorX
+                    local stepY = targetY - moveAccumulatorY
+                    moveAccumulatorX = targetX
+                    moveAccumulatorY = targetY
+
+                    local randPerc = ui.getValue(kUiTab, kUiMain, "Randomizer %") or 0
+                    if randPerc > 0 then
+                        local randStr = (randPerc / 100) * 1.5
+                        stepX = stepX + utility.RandomFloat(-randStr, randStr)
+                        stepY = stepY + utility.RandomFloat(-randStr, randStr)
+                    end
+
+                    local finalMoveX = math.floor(stepX)
+                    local finalMoveY = math.floor(stepY)
+
+                    if finalMoveX ~= 0 or finalMoveY ~= 0 then
+                        utility.MoveMouse(finalMoveX, finalMoveY)
+                        DebugState.TotalX = DebugState.TotalX + finalMoveX
+                        DebugState.TotalY = DebugState.TotalY + finalMoveY
+                        table.insert(DebugState.SprayPath, {x = DebugState.TotalX, y = DebugState.TotalY})
+                    end
+                end
             else
-                mult = GetBlendedEasing(t, easeIdx1, easeIdx2)
-            end
-            
-            local baseFactor = ui.getValue(kUiTab, kUiMain, "Precision Mode (1/10)") and 10 or 1
-            
-            local stepX = (rX / baseFactor / smooth) * mult
-            local stepY = (rY / baseFactor / smooth) * mult
-            
-            local randPerc = ui.getValue(kUiTab, kUiMain, "Randomizer %") or 0
-            if randPerc > 0 then
-                local randStr = (randPerc / 100) * 1.5
-                stepX = stepX + utility.RandomFloat(-randStr, randStr)
-                stepY = stepY + utility.RandomFloat(-randStr, randStr)
-            end
-
-            moveAccumulatorX = moveAccumulatorX + stepX
-            moveAccumulatorY = moveAccumulatorY + stepY
-            DebugState.AccX = moveAccumulatorX
-            DebugState.AccY = moveAccumulatorY
-
-            local finalMoveX = math.floor(moveAccumulatorX)
-            local finalMoveY = math.floor(moveAccumulatorY)
-
-            if finalMoveX ~= 0 or finalMoveY ~= 0 then
-                utility.MoveMouse(finalMoveX, finalMoveY)
-                moveAccumulatorX = moveAccumulatorX - finalMoveX
-                moveAccumulatorY = moveAccumulatorY - finalMoveY
+                local t = (currentTick - sprayStartTime) / easingTime
+                if t > 1.0 then t = 1.0 end
+                local mult = GetBlendedEasing(t, easeIdx1, easeIdx2)
+                local baseFactor = ui.getValue(kUiTab, kUiMain, "Precision Mode (1/10)") and 10 or 1
                 
-                DebugState.TotalX = DebugState.TotalX + finalMoveX
-                DebugState.TotalY = DebugState.TotalY + finalMoveY
-                table.insert(DebugState.SprayPath, {x = DebugState.TotalX, y = DebugState.TotalY})
+                local stepX = (rX / baseFactor / smooth) * mult
+                local stepY = (rY / baseFactor / smooth) * mult
+                
+                local randPerc = ui.getValue(kUiTab, kUiMain, "Randomizer %") or 0
+                if randPerc > 0 then
+                    local randStr = (randPerc / 100) * 1.5
+                    stepX = stepX + utility.RandomFloat(-randStr, randStr)
+                    stepY = stepY + utility.RandomFloat(-randStr, randStr)
+                end
+
+                moveAccumulatorX = moveAccumulatorX + stepX
+                moveAccumulatorY = moveAccumulatorY + stepY
+                DebugState.AccX = moveAccumulatorX
+                DebugState.AccY = moveAccumulatorY
+
+                local finalMoveX = math.floor(moveAccumulatorX)
+                local finalMoveY = math.floor(moveAccumulatorY)
+
+                if finalMoveX ~= 0 or finalMoveY ~= 0 then
+                    utility.MoveMouse(finalMoveX, finalMoveY)
+                    moveAccumulatorX = moveAccumulatorX - finalMoveX
+                    moveAccumulatorY = moveAccumulatorY - finalMoveY
+                    
+                    DebugState.TotalX = DebugState.TotalX + finalMoveX
+                    DebugState.TotalY = DebugState.TotalY + finalMoveY
+                    table.insert(DebugState.SprayPath, {x = DebugState.TotalX, y = DebugState.TotalY})
+                end
             end
         end
     else 
