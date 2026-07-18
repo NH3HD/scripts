@@ -506,7 +506,7 @@ local function ScanAmmoLabels()
     if currentTick - lastScanTime < 1000 then return end 
     lastScanTime = currentTick
 
-    local lp = game:GetService("Players").LocalPlayer
+    local lp = game.LocalPlayer
     if not lp then return end
     
     local pGui = lp:FindFirstChild("PlayerGui")
@@ -775,6 +775,21 @@ end)
 
 ui.newCheckbox(kUiTab, kUiMisc, "Enable Keyframing")
 ui.newInputText(kUiTab, kUiMisc, "Preset Name", "")
+ui.newButton(kUiTab, kUiMisc, "Create Preset", function()
+    local presetName = ui.getValue(kUiTab, kUiMisc, "Preset Name") or ""
+    if presetName and presetName ~= "" then
+        local data_to_save = GetOrCreateKFData(DebugState.Config)
+        if data_to_save then
+            PresetsCache[presetName] = {
+                points = DeepCopyTable(data_to_save.points),
+                count = data_to_save.count,
+                smoothing = data_to_save.smoothing
+            }
+            SavePresets()
+            DebugPrint("[OpOne] Preset saved: " .. presetName)
+        end
+    end
+end)
 
 local KeyframeCache = {}
 local isKeyframeEditorOpen = false
@@ -1234,16 +1249,21 @@ local function DrawKeyframeEditor()
         draw.CircleFilled(px, py, 5, color, 6, 255)
 
         if KF_DragPoint and KF_DragPoint.idx == i then
-            local ngt, ngv = S2G(mx, my)
+            local raw_gt, raw_gv = S2G(mx, my)
+            local ngt = math.max(0, math.min(1, raw_gt))
+            local ngv = math.max(0, math.min(1, raw_gv))
+
             if KF_DragPoint.type == "point" then
-                local dt = ngt - p.t
-                local dv = ngv - p.v
-                p.t = math.max(data.points[i-1].t + 0.01, math.min(data.points[i+1].t - 0.01, ngt))
-                p.v = math.max(0, math.min(1, ngv))
-                p.hL.t = p.hL.t + dt
-                p.hL.v = p.hL.v + dv
-                p.hR.t = p.hR.t + dt
-                p.hR.v = p.hR.v + dv
+                if i ~= 1 and i ~= #data.points then
+                    local dt = ngt - p.t
+                    local dv = ngv - p.v
+                    p.t = math.max(data.points[i-1].t + 0.01, math.min(data.points[i+1].t - 0.01, ngt))
+                    p.v = ngv
+                    p.hL.t = p.hL.t + dt
+                    p.hL.v = p.hL.v + dv
+                    p.hR.t = p.hR.t + dt
+                    p.hR.v = p.hR.v + dv
+                end
             elseif KF_DragPoint.type == "hL" then
                 p.hL.t = math.min(p.t - 0.01, ngt)
                 p.hL.v = ngv
@@ -1306,7 +1326,6 @@ local function DrawKeyframeEditor()
     end
 
     local cy3 = KF_Win3.y + 30
-    local presetName = ui.getValue(kUiTab, kUiMisc, "Preset Name") or ""
 
     if #SelectedKFPoints == 1 then
         local p = data.points[SelectedKFPoints[1]]
@@ -1359,19 +1378,6 @@ local function DrawKeyframeEditor()
     end
 
     cy3 = cy3 + 35
-    draw.TextOutlined("Preset Name: " .. presetName, KF_Win3.x + 20, cy3, Color3.new(1,1,1), "SmallestPixel", 255)
-    if DrawButton(KF_Win3.x + 250, cy3 - 5, 100, 20, "Create Preset") then
-        if presetName and presetName ~= "" then
-            PresetsCache[presetName] = {
-                points = DeepCopyTable(data.points),
-                count = data.count,
-                smoothing = data.smoothing
-            }
-            SavePresets()
-        end
-    end
-
-    cy3 = cy3 + 25
     draw.TextOutlined("Saved Presets:", KF_Win3.x + 20, cy3, Color3.new(1,1,1), "SmallestPixel", 255)
     cy3 = cy3 + 10
     
