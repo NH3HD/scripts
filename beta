@@ -101,7 +101,7 @@ end
 
 local function base64_decode(data)
     data = string.gsub(data, '[^'..b64chars..'=]', '')
-    return (data:gsub('.', function(x)
+    return (data:gub('.', function(x)
         if (x == '=') then return '' end
         local r, f = '', (b64chars:find(x)-1)
         for i = 6, 1, -1 do r = r .. (math.floor(f % 2^i / 2^(i-1)) > 0 and '1' or '0') end
@@ -259,6 +259,240 @@ local function DebugPrint(msg)
     end
 end
 
+local KeyframeCache = {}
+local isKeyframeEditorOpen = false
+local f5_was_pressed = false
+local SelectedKFPoints = {}
+local KF_DragPoint = nil
+local KF_DragSlider = nil
+local KF_ButtonLatch = false
+local TimelineStep = 0
+local CurrentRecX = 0
+local CurrentRecY = 0
+
+local KF_Win1 = {x = 300, y = 200, w = 500, h = 400, dragging = false, dx = 0, dy = 0}
+local KF_Win2 = {x = 820, y = 200, w = 200, h = 400, dragging = false, dx = 0, dy = 0}
+local KF_Win3 = {x = 300, y = 620, w = 720, h = 300, dragging = false, dx = 0, dy = 0}
+
+local function LoadPresets()
+    local content = file.read(PRESET_FILE_PATH)
+    if not content or content == "" then PresetsCache = {} return end
+    local decrypted = DecryptData(content)
+    if not decrypted then PresetsCache = {} return end
+    local success_json, data = pcall(JsonDecode, decrypted)
+    if success_json and type(data) == "table" then
+        PresetsCache = data
+    else
+        PresetsCache = {}
+    end
+end
+
+local function SavePresets()
+    local json_str = JsonEncode(PresetsCache)
+    local encrypted = EncryptData(json_str)
+    file.write(PRESET_FILE_PATH, encrypted)
+end
+LoadPresets()
+
+local function SaveKeyframes()
+    local content = ""
+    for cfg, data in pairs(KeyframeCache) do
+        content = content .. "[" .. cfg .. "]\n"
+        content = content .. "count=" .. tostring(data.count) .. "\n"
+        content = content .. "smoothing=" .. tostring(data.smoothing) .. "\n"
+        local pts_str = {}
+        for _, p in ipairs(data.points) do
+            local hLt, hLv = p.hL and p.hL.t or 0, p.hL and p.hL.v or 0
+            local hRt, hRv = p.hR and p.hR.t or 0, p.hR and p.hR.v or 0
+            table.insert(pts_str, tostring(p.t) .. "," .. tostring(p.v) .. "," .. tostring(p.recX or 0) .. "," .. tostring(p.recY or 0) .. "," .. tostring(hLt) .. "," .. tostring(hLv) .. "," .. tostring(hRt) .. "," .. tostring(hRv))
+        end
+        content = content .. "points=" .. table.concat(pts_str, ";") .. "\n\n"
+    end
+    file.write(KF_FILE_PATH, content)
+end
+
+local function LoadKeyframes()
+    local content = file.read(KF_FILE_PATH)
+    if not content or content == "" then return end
+    local current_cfg = nil
+    for line in string.gmatch(content, "[^\r\n]+") do
+        local cfg_match = string.match(line, "^%[(.-)%]$")
+        if cfg_match then
+            current_cfg = cfg_match
+            KeyframeCache[current_cfg] = {points = {}, count = 2, smoothing = 0.5}
+        elseif current_cfg then
+            local k, v = string.match(line, "^(.-)=(.-)$")
+            if k == "count" then KeyframeCache[current_cfg].count = tonumber(v) or 2
+            elseif k == "smoothing" then KeyframeCache[current_cfg].smoothing = tonumber(v) or 0.5
+            elseif k == "points" then
+                local pts = {}
+                for pt_str in string.gmatch(v, "([^;]+)") do
+                    local t, val, rx, ry, hLt, hLv, hRt, hRv = string.match(pt_str, "(.-),(.-),(.-),(.-),(.-),(.-),(.-),(.-)$")
+                    if t and val then 
+                        table.insert(pts, {
+                            t=tonumber(t) or 0, v=tonumber(val) or 0, 
+                            recX=tonumber(rx) or 0, recY=tonumber(ry) or 0,
+                            hL={t=tonumber(hLt) or 0, v=tonumber(hLv) or 0}, 
+                            hR={t=tonumber(hRt) or 0, v=tonumber(hRv) or 0}
+                        }) 
+                    end
+                end
+                KeyframeCache[current_cfg].points = pts
+            end
+        end
+    end
+end
+LoadKeyframes()
+
+local function GetOrCreateKFData(cfgName)
+    if not cfgName or cfgName == "None" then cfgName = "Default" end
+    if not KeyframeCache[cfgName] then
+        KeyframeCache[cfgName] = {
+            points = {
+                {t=0, v=0, recX=0, recY=0, hL={t=-0.1, v=0}, hR={t=0.1, v=0}}, 
+                {t=1, v=1, recX=0, recY=0, hL={t=0.9, v=1}, hR={t=1.1, v=1}}
+            }, 
+            count = 2, 
+            smoothing = 0.5
+        }
+        SaveKeyframes()
+    end
+    return KeyframeCache[cfgName]
+end
+
+local function SetKeyframeCount(cfgName, count)
+    local data = GetOrCreateKFData(cfgName)
+    if not data then return end
+    count = math.max(2, math.min(20, count))
+    
+    local new_points = {}
+    for i = 1, count do
+        local t = (i - 1) / (count - 1)
+        local v = t
+        local recX = 0
+        local recY = 0
+        
+        if #data.points > 0 then
+            local closest = data.points[1]
+            for _, p in ipairs(data.points) do
+                if math.abs(p.t - t) < math.abs(closest.t - t) then closest = p end
+            end
+            v = closest.v
+            recX = closest.recX or 0
+            recY = closest.recY or 0
+        end
+        
+        table.insert(new_points, {t = t, v = v, recX = recX, recY = recY, hL = {t = t - 0.1, v = v}, hR = {t = t + 0.1, v = v}})
+    end
+    
+    data.points = new_points
+    data.count = count
+    SaveKeyframes()
+end
+
+local function EvaluateTimeline(t_norm)
+    local data = GetOrCreateKFData(DebugState.Config)
+    if not data or #data.points < 2 then return 0, 0 end
+    local seg_t = t_norm * (#data.points - 1)
+    local seg_idx = math.floor(seg_t)
+    if seg_idx >= #data.points - 1 then seg_idx = #data.points - 2 end
+    local local_t = seg_t - seg_idx
+    local p0 = data.points[seg_idx + 1]
+    local p3 = data.points[seg_idx + 2]
+    local recX = (p0.recX or 0) + ((p3.recX or 0) - (p0.recX or 0)) * local_t
+    local recY = (p0.recY or 0) + ((p3.recY or 0) - (p0.recY or 0)) * local_t
+    return recX, recY
+end
+
+local function AddKeyframeAtTimeline(t_norm, recX, recY)
+    local data = GetOrCreateKFData(DebugState.Config)
+    if not data then return end
+    
+    if t_norm <= 0.01 or t_norm >= 0.99 then
+        for _, p in ipairs(data.points) do
+            if math.abs(p.t - t_norm) < 0.01 then
+                p.recX = recX
+                p.recY = recY
+                SaveKeyframes()
+                return
+            end
+        end
+    end
+    
+    local insert_idx = #data.points + 1
+    for i, p in ipairs(data.points) do
+        if math.abs(p.t - t_norm) < 0.01 then
+            p.recX = recX
+            p.recY = recY
+            SaveKeyframes()
+            return
+        end
+        if p.t > t_norm then
+            insert_idx = i
+            break
+        end
+    end
+    
+    local v = 0
+    if #data.points >= 2 then
+        local seg_t = t_norm * (#data.points - 1)
+        local seg_idx = math.floor(seg_t)
+        if seg_idx >= #data.points - 1 then seg_idx = #data.points - 2 end
+        local local_t = seg_t - seg_idx
+        v = data.points[seg_idx + 1].v + (data.points[seg_idx + 2].v - data.points[seg_idx + 1].v) * local_t
+    end
+    
+    local new_point = {
+        t = t_norm,
+        v = v,
+        recX = recX,
+        recY = recY,
+        hL = {t = t_norm - 0.1, v = v},
+        hR = {t = t_norm + 0.1, v = v}
+    }
+    table.insert(data.points, insert_idx, new_point)
+    data.count = #data.points
+    SaveKeyframes()
+end
+
+local function SerializeKFData(cfgName)
+    local data = GetOrCreateKFData(cfgName)
+    if not data then return "" end
+    local pts = {}
+    for _, p in ipairs(data.points) do
+        local p_str = tostring(p.t) .. "_" .. tostring(p.v) .. "_" .. tostring(p.recX or 0) .. "_" .. tostring(p.recY or 0) .. "_" .. tostring(p.hL.t) .. "_" .. tostring(p.hL.v) .. "_" .. tostring(p.hR.t) .. "_" .. tostring(p.hR.v)
+        table.insert(pts, p_str)
+    end
+    return tostring(data.count) .. "~" .. tostring(data.smoothing) .. "~" .. table.concat(pts, ",")
+end
+
+local function DeserializeKFData(cfgName, str)
+    if not str or str == "" then return end
+    local parts = {}
+    for part in string.gmatch(str, "[^~]+") do
+        table.insert(parts, part)
+    end
+    if #parts < 3 then return end
+    local count = tonumber(parts[1]) or 2
+    local smoothing = tonumber(parts[2]) or 0
+    local pts_str = parts[3]
+    local pts = {}
+    for pt_str in string.gmatch(pts_str, "[^,]+") do
+        local p = {}
+        local p_parts = {}
+        for v in string.gmatch(pt_str, "[^_]+") do table.insert(p_parts, v) end
+        p.t = tonumber(p_parts[1]) or 0
+        p.v = tonumber(p_parts[2]) or 0
+        p.recX = tonumber(p_parts[3]) or 0
+        p.recY = tonumber(p_parts[4]) or 0
+        p.hL = {t = tonumber(p_parts[5]) or 0, v = tonumber(p_parts[6]) or 0}
+        p.hR = {t = tonumber(p_parts[7]) or 0, v = tonumber(p_parts[8]) or 0}
+        table.insert(pts, p)
+    end
+    KeyframeCache[cfgName] = {points = pts, count = count, smoothing = smoothing}
+    SaveKeyframes()
+end
+
 local function UpdateConfigNames()
     for k in pairs(ConfigNames) do ConfigNames[k] = nil end
     local tempNames = {}
@@ -316,6 +550,10 @@ local function LoadConfigData(name)
     ui.setValue(kUiTab, kUiMisc, "Config Name", name)
     lastConfigDropdownIndex = cfgIdx
     
+    if d.kf_data_str then
+        DeserializeKFData(name, d.kf_data_str)
+    end
+    
     DebugState.Config = name
 end
 
@@ -342,6 +580,7 @@ local function SaveToFile()
         content = content .. '  target_check: "' .. tostring(data.target_check) .. '"\n'
         content = content .. '  target_fov: "' .. tostring(data.target_fov) .. '"\n'
         content = content .. '  kf_enabled: "' .. tostring(data.kf_enabled) .. '"\n'
+        content = content .. '  kf_data_str: "' .. SerializeKFData(name) .. '"\n'
         content = content .. "}\n\n"
     end
     file.write(FILE_PATH, content)
@@ -368,6 +607,7 @@ local function LoadFromFile()
                 elseif key == "easing_type_2" then currentData[key] = val
                 elseif key == "ramp_time" or key == "easing_time" then 
                     currentData["easing_time"] = tonumber(val) or 1000 
+                elseif key == "kf_data_str" then currentData[key] = val
                 else currentData[key] = tonumber(val) or 0 end
             end
         end
@@ -429,6 +669,7 @@ local function SerializeConfig(cfgName, cfg)
     for k, v in pairs(cfg) do
         table.insert(parts, tostring(k) .. "=" .. tostring(v))
     end
+    table.insert(parts, "kf_data_str=" .. SerializeKFData(cfgName))
     local rawStr = "[OpOne]" .. table.concat(parts, ";")
     return EncryptData(rawStr)
 end
@@ -778,7 +1019,9 @@ ui.newInputText(kUiTab, kUiMisc, "Preset Name", "")
 ui.newButton(kUiTab, kUiMisc, "Create Preset", function()
     local presetName = ui.getValue(kUiTab, kUiMisc, "Preset Name") or ""
     if presetName and presetName ~= "" then
-        local data_to_save = GetOrCreateKFData(DebugState.Config)
+        local cfgName = DebugState.Config
+        if cfgName == "None" then cfgName = "Default" end
+        local data_to_save = GetOrCreateKFData(cfgName)
         if data_to_save then
             PresetsCache[presetName] = {
                 points = DeepCopyTable(data_to_save.points),
@@ -788,204 +1031,10 @@ ui.newButton(kUiTab, kUiMisc, "Create Preset", function()
             SavePresets()
             DebugPrint("[OpOne] Preset saved: " .. presetName)
         end
+    else
+        DebugPrint("[OpOne] Preset name is empty.")
     end
 end)
-
-local KeyframeCache = {}
-local isKeyframeEditorOpen = false
-local f5_was_pressed = false
-local SelectedKFPoints = {}
-local KF_DragPoint = nil
-local KF_DragSlider = nil
-local KF_ButtonLatch = false
-local TimelineStep = 0
-local CurrentRecX = 0
-local CurrentRecY = 0
-
-local KF_Win1 = {x = 300, y = 200, w = 500, h = 400, dragging = false, dx = 0, dy = 0}
-local KF_Win2 = {x = 820, y = 200, w = 200, h = 400, dragging = false, dx = 0, dy = 0}
-local KF_Win3 = {x = 300, y = 620, w = 720, h = 300, dragging = false, dx = 0, dy = 0}
-
-local function LoadPresets()
-    local content = file.read(PRESET_FILE_PATH)
-    if not content or content == "" then PresetsCache = {} return end
-    local decrypted = DecryptData(content)
-    if not decrypted then PresetsCache = {} return end
-    local success_json, data = pcall(JsonDecode, decrypted)
-    if success_json and type(data) == "table" then
-        PresetsCache = data
-    else
-        PresetsCache = {}
-    end
-end
-
-local function SavePresets()
-    local json_str = JsonEncode(PresetsCache)
-    local encrypted = EncryptData(json_str)
-    file.write(PRESET_FILE_PATH, encrypted)
-end
-LoadPresets()
-
-local function SaveKeyframes()
-    local content = ""
-    for cfg, data in pairs(KeyframeCache) do
-        content = content .. "[" .. cfg .. "]\n"
-        content = content .. "count=" .. tostring(data.count) .. "\n"
-        content = content .. "smoothing=" .. tostring(data.smoothing) .. "\n"
-        local pts_str = {}
-        for _, p in ipairs(data.points) do
-            local hLt, hLv = p.hL and p.hL.t or 0, p.hL and p.hL.v or 0
-            local hRt, hRv = p.hR and p.hR.t or 0, p.hR and p.hR.v or 0
-            table.insert(pts_str, tostring(p.t) .. "," .. tostring(p.v) .. "," .. tostring(p.recX or 0) .. "," .. tostring(p.recY or 0) .. "," .. tostring(hLt) .. "," .. tostring(hLv) .. "," .. tostring(hRt) .. "," .. tostring(hRv))
-        end
-        content = content .. "points=" .. table.concat(pts_str, ";") .. "\n\n"
-    end
-    file.write(KF_FILE_PATH, content)
-end
-
-local function LoadKeyframes()
-    local content = file.read(KF_FILE_PATH)
-    if not content or content == "" then return end
-    local current_cfg = nil
-    for line in string.gmatch(content, "[^\r\n]+") do
-        local cfg_match = string.match(line, "^%[(.-)%]$")
-        if cfg_match then
-            current_cfg = cfg_match
-            KeyframeCache[current_cfg] = {points = {}, count = 2, smoothing = 0.5}
-        elseif current_cfg then
-            local k, v = string.match(line, "^(.-)=(.-)$")
-            if k == "count" then KeyframeCache[current_cfg].count = tonumber(v) or 2
-            elseif k == "smoothing" then KeyframeCache[current_cfg].smoothing = tonumber(v) or 0.5
-            elseif k == "points" then
-                local pts = {}
-                for pt_str in string.gmatch(v, "([^;]+)") do
-                    local t, val, rx, ry, hLt, hLv, hRt, hRv = string.match(pt_str, "(.-),(.-),(.-),(.-),(.-),(.-),(.-),(.-)$")
-                    if t and val then 
-                        table.insert(pts, {
-                            t=tonumber(t) or 0, v=tonumber(val) or 0, 
-                            recX=tonumber(rx) or 0, recY=tonumber(ry) or 0,
-                            hL={t=tonumber(hLt) or 0, v=tonumber(hLv) or 0}, 
-                            hR={t=tonumber(hRt) or 0, v=tonumber(hRv) or 0}
-                        }) 
-                    end
-                end
-                KeyframeCache[current_cfg].points = pts
-            end
-        end
-    end
-end
-LoadKeyframes()
-
-local function GetOrCreateKFData(cfgName)
-    if not cfgName or cfgName == "None" then return nil end
-    if not KeyframeCache[cfgName] then
-        KeyframeCache[cfgName] = {
-            points = {
-                {t=0, v=0, recX=0, recY=0, hL={t=-0.1, v=0}, hR={t=0.1, v=0}}, 
-                {t=1, v=1, recX=0, recY=0, hL={t=0.9, v=1}, hR={t=1.1, v=1}}
-            }, 
-            count = 2, 
-            smoothing = 0.5
-        }
-        SaveKeyframes()
-    end
-    return KeyframeCache[cfgName]
-end
-
-local function SetKeyframeCount(cfgName, count)
-    local data = GetOrCreateKFData(cfgName)
-    if not data then return end
-    count = math.max(2, math.min(20, count))
-    
-    local new_points = {}
-    for i = 1, count do
-        local t = (i - 1) / (count - 1)
-        local v = t
-        local recX = 0
-        local recY = 0
-        
-        if #data.points > 0 then
-            local closest = data.points[1]
-            for _, p in ipairs(data.points) do
-                if math.abs(p.t - t) < math.abs(closest.t - t) then closest = p end
-            end
-            v = closest.v
-            recX = closest.recX or 0
-            recY = closest.recY or 0
-        end
-        
-        table.insert(new_points, {t = t, v = v, recX = recX, recY = recY, hL = {t = t - 0.1, v = v}, hR = {t = t + 0.1, v = v}})
-    end
-    
-    data.points = new_points
-    data.count = count
-    SaveKeyframes()
-end
-
-local function EvaluateTimeline(t_norm)
-    local data = GetOrCreateKFData(DebugState.Config)
-    if not data or #data.points < 2 then return 0, 0 end
-    local seg_t = t_norm * (#data.points - 1)
-    local seg_idx = math.floor(seg_t)
-    if seg_idx >= #data.points - 1 then seg_idx = #data.points - 2 end
-    local local_t = seg_t - seg_idx
-    local p0 = data.points[seg_idx + 1]
-    local p3 = data.points[seg_idx + 2]
-    local recX = (p0.recX or 0) + ((p3.recX or 0) - (p0.recX or 0)) * local_t
-    local recY = (p0.recY or 0) + ((p3.recY or 0) - (p0.recY or 0)) * local_t
-    return recX, recY
-end
-
-local function AddKeyframeAtTimeline(t_norm, recX, recY)
-    local data = GetOrCreateKFData(DebugState.Config)
-    if not data then return end
-    
-    if t_norm <= 0.01 or t_norm >= 0.99 then
-        for _, p in ipairs(data.points) do
-            if math.abs(p.t - t_norm) < 0.01 then
-                p.recX = recX
-                p.recY = recY
-                SaveKeyframes()
-                return
-            end
-        end
-    end
-    
-    local insert_idx = #data.points + 1
-    for i, p in ipairs(data.points) do
-        if math.abs(p.t - t_norm) < 0.01 then
-            p.recX = recX
-            p.recY = recY
-            SaveKeyframes()
-            return
-        end
-        if p.t > t_norm then
-            insert_idx = i
-            break
-        end
-    end
-    
-    local v = 0
-    if #data.points >= 2 then
-        local seg_t = t_norm * (#data.points - 1)
-        local seg_idx = math.floor(seg_t)
-        if seg_idx >= #data.points - 1 then seg_idx = #data.points - 2 end
-        local local_t = seg_t - seg_idx
-        v = data.points[seg_idx + 1].v + (data.points[seg_idx + 2].v - data.points[seg_idx + 1].v) * local_t
-    end
-    
-    local new_point = {
-        t = t_norm,
-        v = v,
-        recX = recX,
-        recY = recY,
-        hL = {t = t_norm - 0.1, v = v},
-        hR = {t = t_norm + 0.1, v = v}
-    }
-    table.insert(data.points, insert_idx, new_point)
-    data.count = #data.points
-    SaveKeyframes()
-end
 
 local function PointInRect(px, py, rx, ry, rw, rh)
     return px >= rx and px <= rx + rw and py >= ry and py <= ry + rh
@@ -1255,20 +1304,26 @@ local function DrawKeyframeEditor()
 
             if KF_DragPoint.type == "point" then
                 if i ~= 1 and i ~= #data.points then
-                    local dt = ngt - p.t
+                    local prev_t = data.points[i-1].t
+                    local next_t = data.points[i+1].t
+                    local clamped_t = math.max(prev_t + 0.01, math.min(next_t - 0.01, ngt))
+                    
+                    local dt = clamped_t - p.t
                     local dv = ngv - p.v
-                    p.t = math.max(data.points[i-1].t + 0.01, math.min(data.points[i+1].t - 0.01, ngt))
+                    
+                    p.t = clamped_t
                     p.v = ngv
+                    
                     p.hL.t = p.hL.t + dt
                     p.hL.v = p.hL.v + dv
                     p.hR.t = p.hR.t + dt
                     p.hR.v = p.hR.v + dv
                 end
             elseif KF_DragPoint.type == "hL" then
-                p.hL.t = math.min(p.t - 0.01, ngt)
+                p.hL.t = math.max(0, math.min(p.t - 0.01, ngt))
                 p.hL.v = ngv
             elseif KF_DragPoint.type == "hR" then
-                p.hR.t = math.max(p.t + 0.01, ngt)
+                p.hR.t = math.max(p.t + 0.01, math.min(1, ngt))
                 p.hR.v = ngv
             end
         end
