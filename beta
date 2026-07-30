@@ -17,6 +17,7 @@ local MasterSettings = {
 }
 local AmmoInstancesCache = {} 
 local Waypoints = {}
+local VisualCache = { dirty = true, points = {}, maxDist = 1 }
 
 local DebugState = {
     Weapon = "None",
@@ -86,7 +87,7 @@ end
 local b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
 local function base64_encode(data)
-    return ((data:gub('.', function(x) 
+    return ((data:gsub('.', function(x) 
         local r, b = '', x:byte()
         for i = 8, 1, -1 do r = r .. (math.floor(b % 2^i / 2^(i-1)) > 0 and '1' or '0') end
         return r
@@ -100,7 +101,7 @@ end
 
 local function base64_decode(data)
     data = string.gsub(data, '[^'..b64chars..'=]', '')
-    return (data:gub('.', function(x)
+    return (data:gsub('.', function(x)
         if (x == '=') then return '' end
         local r, f = '', (b64chars:find(x)-1)
         for i = 6, 1, -1 do r = r .. (math.floor(f % 2^i / 2^(i-1)) > 0 and '1' or '0') end
@@ -259,19 +260,30 @@ local function DebugPrint(msg)
     end
 end
 
-local function SerializeWaypoints()
-    return JsonEncode(Waypoints)
-end
-
-local function DeserializeWaypoints(str)
-    if not str or str == "" then Waypoints = {} return end
-    local success, data = pcall(JsonDecode, str)
-    if success and type(data) == "table" then
-        Waypoints = data
-        table.sort(Waypoints, function(a, b) return a.shot < b.shot end)
-    else
-        Waypoints = {}
+local function RebuildVisualCache()
+    VisualCache.points = {}
+    VisualCache.maxDist = 1
+    if #Waypoints == 0 then VisualCache.dirty = false return end
+    
+    local simX, simY = 0, 0
+    local last_wp = Waypoints[#Waypoints]
+    local max_shots = last_wp.shot + 5
+    
+    table.insert(VisualCache.points, {x = 0, y = 0, is_wp = true})
+    
+    for s = 1, max_shots do
+        local tX, tY = GetRecoilForShot(s)
+        simX = simX + tX
+        simY = simY + tY
+        local is_wp = false
+        for _, wp in ipairs(Waypoints) do
+            if wp.shot == s then is_wp = true break end
+        end
+        table.insert(VisualCache.points, {x = simX, y = simY, is_wp = is_wp})
+        local dist = math.sqrt(simX^2 + simY^2)
+        if dist > VisualCache.maxDist then VisualCache.maxDist = dist end
     end
+    VisualCache.dirty = false
 end
 
 local function UpdateConfigNames()
@@ -331,69 +343,30 @@ local function LoadConfigData(name)
     ui.setValue(kUiTab, kUiMisc, "Config Name", name)
     lastConfigDropdownIndex = cfgIdx
     
-    if d.waypoints_str then
-        DeserializeWaypoints(d.waypoints_str)
-    else
-        Waypoints = {}
-    end
+    Waypoints = d.waypoints or {}
+    table.sort(Waypoints, function(a, b) return a.shot < b.shot end)
+    VisualCache.dirty = true
     
     DebugState.Config = name
 end
 
 local function SaveToFile()
-    local content = ""
-    for name, data in pairs(AllConfigs) do
-        content = content .. "{\n"
-        content = content .. '  config_name: "' .. name .. '"\n'
-        content = content .. '  act_key1: "' .. tostring(data.act_key1) .. '"\n'
-        content = content .. '  act_key2: "' .. tostring(data.act_key2) .. '"\n'
-        content = content .. '  act_logic: "' .. tostring(data.act_logic) .. '"\n'
-        content = content .. '  act_mode: "' .. tostring(data.act_mode) .. '"\n'
-        content = content .. '  recoil_x: "' .. tostring(data.recoil_x) .. '"\n'
-        content = content .. '  recoil_y: "' .. tostring(data.recoil_y) .. '"\n'
-        content = content .. '  delay: "' .. tostring(data.delay) .. '"\n'
-        content = content .. '  smooth: "' .. tostring(data.smooth) .. '"\n'
-        content = content .. '  randomizer: "' .. tostring(data.randomizer) .. '"\n'
-        content = content .. '  weak_mode: "' .. tostring(data.weak_mode) .. '"\n'
-        content = content .. '  easing_type: "' .. tostring(data.easing_type) .. '"\n'
-        content = content .. '  easing_type_2: "' .. tostring(data.easing_type_2) .. '"\n'
-        content = content .. '  easing_time: "' .. tostring(data.easing_time) .. '"\n'
-        content = content .. '  tool_check: "' .. tostring(data.tool_check) .. '"\n'
-        content = content .. '  ammo_check: "' .. tostring(data.ammo_check) .. '"\n'
-        content = content .. '  target_check: "' .. tostring(data.target_check) .. '"\n'
-        content = content .. '  target_fov: "' .. tostring(data.target_fov) .. '"\n'
-        content = content .. '  wp_enabled: "' .. tostring(data.wp_enabled) .. '"\n'
-        content = content .. '  waypoints_str: "' .. SerializeWaypoints() .. '"\n'
-        content = content .. "}\n\n"
-    end
-    file.write(FILE_PATH, content)
+    local json_str = JsonEncode(AllConfigs)
+    local encrypted = EncryptData(json_str)
+    file.write(FILE_PATH, encrypted)
     UpdateConfigNames()
 end
 
 local function LoadFromFile()
     local content = file.read(FILE_PATH)
     if not content or content == "" then UpdateConfigNames(); return end
-    AllConfigs = {}
-    local currentData = {}
-    local insideBlock = false
-    for line in string.gmatch(content, "[^\r\n]+") do
-        local clean = string.match(line, "^%s*(.-)%s*$")
-        if clean == "{" then insideBlock = true; currentData = {}
-        elseif clean == "}" then insideBlock = false; if currentData.config_name then AllConfigs[currentData.config_name] = currentData end
-        elseif insideBlock and clean ~= "" then
-            local key, val = string.match(clean, '^(.-):%s*"(.-)"')
-            if key and val then
-                if key == "config_name" then currentData.config_name = val
-                elseif val == "true" then currentData[key] = true
-                elseif val == "false" then currentData[key] = false
-                elseif key == "easing_type" then currentData[key] = val
-                elseif key == "easing_type_2" then currentData[key] = val
-                elseif key == "ramp_time" or key == "easing_time" then 
-                    currentData["easing_time"] = tonumber(val) or 1000 
-                elseif key == "waypoints_str" then currentData[key] = val
-                else currentData[key] = tonumber(val) or 0 end
-            end
-        end
+    local decrypted = DecryptData(content)
+    if not decrypted then UpdateConfigNames(); return end
+    local success, data = pcall(JsonDecode, decrypted)
+    if success and type(data) == "table" then
+        AllConfigs = data
+    else
+        AllConfigs = {}
     end
     UpdateConfigNames()
 end
@@ -446,33 +419,20 @@ local function LoadMasterSettings()
     end
 end
 
-local function SerializeConfig(cfgName, cfg)
-    local parts = {}
-    table.insert(parts, "config_name=" .. tostring(cfgName))
-    for k, v in pairs(cfg) do
-        table.insert(parts, tostring(k) .. "=" .. tostring(v))
-    end
-    table.insert(parts, "waypoints_str=" .. SerializeWaypoints())
-    local rawStr = "[OpOne]" .. table.concat(parts, ";")
-    return EncryptData(rawStr)
+local function ExportConfigToClipboard(name)
+    if not AllConfigs[name] then return end
+    local cfg_copy = DeepCopyTable(AllConfigs[name])
+    cfg_copy.config_name = name
+    local json_str = JsonEncode(cfg_copy)
+    local encrypted = EncryptData(json_str)
+    utility.SetClipboard(encrypted)
 end
 
-local function DeserializeConfig(encodedStr)
-    if not encodedStr or type(encodedStr) ~= "string" then return nil end
-    
-    local decryptedStr = DecryptData(encodedStr)
-    if not decryptedStr or string.sub(decryptedStr, 1, 7) ~= "[OpOne]" then return nil end
-    
-    local cfg = {}
-    local dataStr = string.sub(decryptedStr, 8)
-    for k, v in string.gmatch(dataStr, "([^=;]+)=([^=;]+)") do
-        if v == "true" then cfg[k] = true
-        elseif v == "false" then cfg[k] = false
-        elseif tonumber(v) then cfg[k] = tonumber(v)
-        else cfg[k] = v end
-    end
-    
-    if cfg.recoil_x == nil or cfg.recoil_y == nil then return nil end
+local function ImportConfigFromClipboard(str)
+    local decrypted = DecryptData(str)
+    if not decrypted then return nil end
+    local success, cfg = pcall(JsonDecode, decrypted)
+    if not success or type(cfg) ~= "table" then return nil end
     return cfg
 end
 
@@ -738,7 +698,8 @@ ui.newButton(kUiTab, kUiMisc, "Save / Create Config", function()
         easing_time = ui.getValue(kUiTab, kUiMain, "Easing Time (ms)"),
         target_check = ui.getValue(kUiTab, kUiMisc, "Target Check (FOV)"),
         target_fov = ui.getValue(kUiTab, kUiMisc, "Target FOV"),
-        wp_enabled = ui.getValue(kUiWay, kUiWay, "Enable Waypoints")
+        wp_enabled = ui.getValue(kUiWay, kUiWay, "Enable Waypoints"),
+        waypoints = DeepCopyTable(Waypoints)
     }
     SaveToFile()
     DebugPrint("[OpOne] Saved Config: " .. name)
@@ -757,8 +718,7 @@ end)
 ui.newButton(kUiTab, kUiMisc, "Export Config to Clipboard", function()
     local name = ui.getValue(kUiTab, kUiMisc, "Config Name")
     if name and AllConfigs[name] then
-        local str = SerializeConfig(name, AllConfigs[name])
-        utility.SetClipboard(str)
+        ExportConfigToClipboard(name)
         DebugPrint("[OpOne] Config '" .. name .. "' copied to clipboard!")
     else
         DebugPrint("[OpOne] Select a valid config to export.")
@@ -767,7 +727,7 @@ end)
 
 ui.newButton(kUiTab, kUiMisc, "Import Config from Clipboard", function()
     local str = utility.GetClipboard()
-    local cfg = DeserializeConfig(str)
+    local cfg = ImportConfigFromClipboard(str)
     
     if cfg then
         local name = cfg.config_name
@@ -846,6 +806,7 @@ ui.newButton(kUiWay, kUiWay, "Add / Update Waypoint", function()
             table.insert(Waypoints, {shot = shot, x = x, y = y})
         end
         table.sort(Waypoints, function(a, b) return a.shot < b.shot end)
+        VisualCache.dirty = true
         DebugPrint("[OpOne] Waypoint updated/added for shot " .. shot)
     else
         DebugPrint("[OpOne] Invalid input for Waypoint.")
@@ -853,6 +814,7 @@ ui.newButton(kUiWay, kUiWay, "Add / Update Waypoint", function()
 end)
 ui.newButton(kUiWay, kUiWay, "Clear All Waypoints", function()
     Waypoints = {}
+    VisualCache.dirty = true
     DebugPrint("[OpOne] All Waypoints cleared.")
 end)
 
@@ -974,49 +936,62 @@ local function SafeDrawGraph()
         draw.RectFilled(gx, gy, boxSize, boxSize, Color3.new(0.05, 0.05, 0.05), 0, 240)
         draw.Rect(gx, gy, boxSize, boxSize, isDraggingGraph and Color3.new(1,1,1) or Color3.new(0, 0.8, 0.5), 1, 0, 255)
         draw.TextOutlined("RECOIL SIMULATION", gx + 5, gy + 5, Color3.new(1,1,1), "SmallestPixel", 200)
-
-        local rX = ui.getValue(kUiTab, kUiMain, "Recoil X") or 0
-        local rY = ui.getValue(kUiTab, kUiMain, "Recoil Y") or 0
-        local easingTime = ui.getValue(kUiTab, kUiMain, "Easing Time (ms)") or 1000
-        local easeIdx1 = ui.getValue(kUiTab, kUiMain, "Primary Easing") or 0
-        local easeIdx2 = ui.getValue(kUiTab, kUiMain, "Secondary Easing") or 0
-        
-        local isWeak = ui.getValue(kUiTab, kUiMain, "Precision Mode (1/10)")
-        local randPerc = ui.getValue(kUiTab, kUiMain, "Randomizer %") or 0
-        local baseFactor = isWeak and 10 or 1 
-
-        local simPoints = {}
-        local simX, simY = 0, 0
-        table.insert(simPoints, {x = 0, y = 0, speed = 0})
-        local maxSpeed = 0
-        local minX, maxX, minY, maxY = 0, 0, 0, 0
         
         local wp_enabled = ui.getValue(kUiWay, kUiWay, "Enable Waypoints")
         
         if wp_enabled and #Waypoints > 0 then
-            local last_wp = Waypoints[#Waypoints]
-            local max_shots = last_wp.shot + 5
-            for shot = 1, max_shots do
-                local tX, tY = GetWaypointTarget(shot)
-                local stepX = tX - simX
-                local stepY = tY - simY
-                simX = tX
-                simY = tY
-                
-                if randPerc > 0 then
-                    local randStr = (randPerc / 100) * 1.5
-                    stepX = stepX + utility.RandomFloat(-randStr, randStr)
-                    stepY = stepY + utility.RandomFloat(-randStr, randStr)
-                end
-                
-                local currentSpeed = math.sqrt(stepX^2 + stepY^2)
-                if currentSpeed > maxSpeed then maxSpeed = currentSpeed end
-                
-                if simX < minX then minX = simX end; if simX > maxX then maxX = simX end
-                if simY < minY then minY = simY end; if simY > maxY then maxY = simY end
-                table.insert(simPoints, {x = simX, y = simY, speed = currentSpeed})
+            if VisualCache.dirty then
+                RebuildVisualCache()
             end
+            
+            local maxVisible = (boxSize/2) - 20
+            local finalScale = 1.0
+            if VisualCache.maxDist > maxVisible then finalScale = maxVisible / VisualCache.maxDist end
+            
+            local centerX, centerY = gx + (boxSize / 2), gy + (boxSize / 2)
+            draw.Line(centerX, gy, centerX, gy+boxSize, Color3.new(0.3,0.3,0.3), 1, 100)
+            draw.Line(gx, centerY, gx+boxSize, centerY, Color3.new(0.3,0.3,0.3), 1, 100)
+            
+            local cGreen = Color3.new(0,1,0)
+            local cYellow = Color3.new(1,1,0)
+            
+            if #VisualCache.points > 1 then
+                for i = 1, #VisualCache.points - 1 do
+                    local p1 = VisualCache.points[i]
+                    local p2 = VisualCache.points[i+1]
+                    local x1 = centerX + p1.x * finalScale
+                    local y1 = centerY - p1.y * finalScale 
+                    local x2 = centerX + p2.x * finalScale
+                    local y2 = centerY - p2.y * finalScale 
+                    draw.Line(x1, y1, x2, y2, cGreen, 2, 255)
+                end
+            end
+            
+            for _, p in ipairs(VisualCache.points) do
+                if p.is_wp then
+                    local px = centerX + p.x * finalScale
+                    local py = centerY - p.y * finalScale
+                    draw.CircleFilled(px, py, 3, cYellow, 6, 255)
+                end
+            end
+            draw.CircleFilled(centerX, centerY, 3, Color3.new(1,1,1), 8, 255)
         else
+            local rX = ui.getValue(kUiTab, kUiMain, "Recoil X") or 0
+            local rY = ui.getValue(kUiTab, kUiMain, "Recoil Y") or 0
+            local easingTime = ui.getValue(kUiTab, kUiMain, "Easing Time (ms)") or 1000
+            local easeIdx1 = ui.getValue(kUiTab, kUiMain, "Primary Easing") or 0
+            local easeIdx2 = ui.getValue(kUiTab, kUiMain, "Secondary Easing") or 0
+            
+            local isWeak = ui.getValue(kUiTab, kUiMain, "Precision Mode (1/10)")
+            local randPerc = ui.getValue(kUiTab, kUiMain, "Randomizer %") or 0
+            local baseFactor = isWeak and 10 or 1 
+
+            local simPoints = {}
+            local simX, simY = 0, 0
+            table.insert(simPoints, {x = 0, y = 0, speed = 0})
+            local maxSpeed = 0
+            local minX, maxX, minY, maxY = 0, 0, 0, 0
+            
             for t = 0, easingTime, 10 do
                 local progress = t / easingTime
                 if progress > 1 then progress = 1 end
@@ -1039,39 +1014,43 @@ local function SafeDrawGraph()
                 if simY < minY then minY = simY end; if simY > maxY then maxY = simY end
                 table.insert(simPoints, {x = simX, y = simY, speed = currentSpeed})
             end
-        end
 
-        local rangeX, rangeY = maxX - minX, maxY - minY
-        if rangeX == 0 then rangeX = 1 end; if rangeY == 0 then rangeY = 1 end
-        local maxDist = math.max(math.abs(minX), math.abs(maxX), math.abs(minY), math.abs(maxY))
-        local finalScale = 1.0
-        local maxVisible = (boxSize/2) - 20
-        if maxDist > maxVisible then finalScale = maxVisible / maxDist end
+            local rangeX, rangeY = maxX - minX, maxY - minY
+            if rangeX == 0 then rangeX = 1 end; if rangeY == 0 then rangeY = 1 end
+            local maxDist = math.max(math.abs(minX), math.abs(maxX), math.abs(minY), math.abs(maxY))
+            local finalScale = 1.0
+            local maxVisible = (boxSize/2) - 20
+            if maxDist > maxVisible then finalScale = maxVisible / maxDist end
 
-        local centerX, centerY = gx + (boxSize / 2), gy + (boxSize / 2)
-        draw.Line(centerX, gy, centerX, gy+boxSize, Color3.new(0.3,0.3,0.3), 1, 100)
-        draw.Line(gx, centerY, gx+boxSize, centerY, Color3.new(0.3,0.3,0.3), 1, 100)
+            local centerX, centerY = gx + (boxSize / 2), gy + (boxSize / 2)
+            draw.Line(centerX, gy, centerX, gy+boxSize, Color3.new(0.3,0.3,0.3), 1, 100)
+            draw.Line(gx, centerY, gx+boxSize, centerY, Color3.new(0.3,0.3,0.3), 1, 100)
 
-        local cGreen, cYellow, cRed = Color3.new(0,1,0), Color3.new(1,1,0), Color3.new(1,0,0)
-        if #simPoints > 1 then
-            for i = 1, #simPoints - 1 do
-                local p1, p2 = simPoints[i], simPoints[i+1]
-                local x1 = centerX + p1.x * finalScale
-                local y1 = centerY - p1.y * finalScale 
-                local x2 = centerX + p2.x * finalScale
-                local y2 = centerY - p2.y * finalScale 
-                
-                local intensity = (maxSpeed > 0) and (p2.speed / maxSpeed) or 0
-                local segColor = (intensity < 0.5) and cGreen:Lerp(cYellow, intensity*2) or cYellow:Lerp(cRed, (intensity-0.5)*2)
-                draw.Line(x1, y1, x2, y2, segColor, 2, 255)
+            local cGreen, cYellow, cRed = Color3.new(0,1,0), Color3.new(1,1,0), Color3.new(1,0,0)
+            if #simPoints > 1 then
+                for i = 1, #simPoints - 1 do
+                    local p1, p2 = simPoints[i], simPoints[i+1]
+                    local x1 = centerX + p1.x * finalScale
+                    local y1 = centerY - p1.y * finalScale 
+                    local x2 = centerX + p2.x * finalScale
+                    local y2 = centerY - p2.y * finalScale 
+                    
+                    local intensity = (maxSpeed > 0) and (p2.speed / maxSpeed) or 0
+                    local segColor = (intensity < 0.5) and cGreen:Lerp(cYellow, intensity*2) or cYellow:Lerp(cRed, (intensity-0.5)*2)
+                    draw.Line(x1, y1, x2, y2, segColor, 2, 255)
+                end
             end
+            draw.CircleFilled(centerX, centerY, 3, Color3.new(1,1,1), 8, 255)
         end
-        draw.CircleFilled(centerX, centerY, 3, Color3.new(1,1,1), 8, 255)
         
         local targetCheck = ui.getValue(kUiTab, kUiMisc, "Target Check (FOV)")
         local showFov = ui.getValue(kUiTab, kUiMisc, "Visualize FOV")
         if targetCheck and showFov then
             local fovRadius = ui.getValue(kUiTab, kUiMisc, "Target FOV") or 100
+            local maxVisible = (boxSize/2) - 20
+            local finalScale = 1.0
+            if VisualCache.maxDist > maxVisible then finalScale = maxVisible / VisualCache.maxDist end
+            local centerX, centerY = gx + (boxSize / 2), gy + (boxSize / 2)
             draw.Circle(centerX, centerY, fovRadius * (finalScale * 0.5), Color3.new(1, 1, 1), 1, 12, 100) 
         end
     end
