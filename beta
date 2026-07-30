@@ -402,7 +402,7 @@ local function SaveToFile()
         content = content .. '  target_check: "' .. tostring(data.target_check) .. '"\n'
         content = content .. '  target_fov: "' .. tostring(data.target_fov) .. '"\n'
         content = content .. '  wp_enabled: "' .. tostring(data.wp_enabled) .. '"\n'
-        content = content .. '  waypoints_data: "' .. tostring(data.waypoints_data or "") .. '"\n'
+        content = content .. '  waypoints_data: "' .. base64_encode(data.waypoints_data or "") .. '"\n'
         content = content .. "}\n\n"
     end
     file.write(FILE_PATH, content)
@@ -429,7 +429,8 @@ local function LoadFromFile()
                 elseif key == "easing_type_2" then currentData[key] = val
                 elseif key == "ramp_time" or key == "easing_time" then 
                     currentData["easing_time"] = tonumber(val) or 1000 
-                elseif key == "waypoints_data" then currentData[key] = val
+                elseif key == "waypoints_data" then 
+                    currentData[key] = base64_decode(val)
                 else currentData[key] = tonumber(val) or 0 end
             end
         end
@@ -759,7 +760,10 @@ ui.newDropdown(kUiTab, kUiMisc, "Select Config", ConfigNames, 0)
 
 ui.newButton(kUiTab, kUiMisc, "Save / Create Config", function() 
     local name = ui.getValue(kUiTab, kUiMisc, "Config Name")
-    if not name or name == "" or name == "None" then return end
+    if not name or name == "" or name == "None" then 
+        print("[OpOne] Failed to save: Invalid config name.")
+        return 
+    end
     local easeIdx = ui.getValue(kUiTab, kUiMain, "Primary Easing")
     local easeIdx2 = ui.getValue(kUiTab, kUiMain, "Secondary Easing")
     
@@ -785,7 +789,7 @@ ui.newButton(kUiTab, kUiMisc, "Save / Create Config", function()
         waypoints_data = JsonEncode(Waypoints)
     }
     SaveToFile()
-    DebugPrint("[OpOne] Saved Config: " .. name)
+    print("[OpOne] Saved Config: " .. name)
 end)
 
 ui.newButton(kUiTab, kUiMisc, "Delete Config", function()
@@ -794,7 +798,7 @@ ui.newButton(kUiTab, kUiMisc, "Delete Config", function()
         AllConfigs[name] = nil
         ui.setValue(kUiTab, kUiMisc, "Config Name", "")
         SaveToFile()
-        DebugPrint("[OpOne] Deleted Config: " .. name)
+        print("[OpOne] Deleted Config: " .. name)
     end
 end)
 
@@ -803,9 +807,9 @@ ui.newButton(kUiTab, kUiMisc, "Export Config to Clipboard", function()
     if name and AllConfigs[name] then
         local str = SerializeConfig(name, AllConfigs[name])
         utility.SetClipboard(str)
-        DebugPrint("[OpOne] Config '" .. name .. "' copied to clipboard!")
+        print("[OpOne] Config '" .. name .. "' copied to clipboard!")
     else
-        DebugPrint("[OpOne] Select a valid config to export.")
+        print("[OpOne] Select a valid config to export.")
     end
 end)
 
@@ -826,9 +830,9 @@ ui.newButton(kUiTab, kUiMisc, "Import Config from Clipboard", function()
         UpdateConfigNames()
         LoadConfigData(name)
         
-        DebugPrint("[OpOne] Config successfully imported as: " .. name)
+        print("[OpOne] Config successfully imported as: " .. name)
     else
-        DebugPrint("[OpOne] Failed to import. No valid config found in clipboard.")
+        print("[OpOne] Failed to import. No valid config found in clipboard.")
     end
 end)
 
@@ -838,7 +842,7 @@ ui.newButton(kUiTab, kUiMisc, "Link Weapon -> Config", function()
     if wpn and cfgName and cfgName ~= "" and cfgName ~= "None" then
         WeaponLinks[wpn] = cfgName
         SaveWeaponLinks()
-        DebugPrint("[OpOne] Linked Weapon: [" .. wpn .. "] to Config: [" .. cfgName .. "]")
+        print("[OpOne] Linked Weapon: [" .. wpn .. "] to Config: [" .. cfgName .. "]")
     end
 end)
 
@@ -847,7 +851,7 @@ ui.newButton(kUiTab, kUiMisc, "Unlink Current Weapon", function()
     if wpn and WeaponLinks[wpn] then
         WeaponLinks[wpn] = nil
         SaveWeaponLinks()
-        DebugPrint("[OpOne] Unlinked Weapon: [" .. wpn .. "]")
+        print("[OpOne] Unlinked Weapon: [" .. wpn .. "]")
     end
 end)
 
@@ -859,7 +863,7 @@ ui.newButton(kUiTab, kUiMisc, "Set Default Config", function()
     local defName = ui.getValue(kUiTab, kUiMisc, "Default Config")
     MasterSettings.DefaultConfigName = defName
     SaveMasterSettings()
-    DebugPrint("[OpOne] Default Fallback Config set to: " .. defName)
+    print("[OpOne] Default Fallback Config set to: " .. defName)
 end)
 
 ui.newContainer(kUiWay, kUiWay, "Waypoint Manager", { autosize = true })
@@ -891,15 +895,15 @@ ui.newButton(kUiWay, kUiWay, "Add / Update Waypoint", function()
         end
         table.sort(Waypoints, function(a, b) return a.shot < b.shot end)
         VisualCache.dirty = true
-        DebugPrint("[OpOne] Waypoint updated/added for shot " .. shot)
+        print("[OpOne] Waypoint updated/added for shot " .. shot)
     else
-        DebugPrint("[OpOne] Invalid input for Waypoint.")
+        print("[OpOne] Invalid input for Waypoint.")
     end
 end)
 ui.newButton(kUiWay, kUiWay, "Clear All Waypoints", function()
     Waypoints = {}
     VisualCache.dirty = true
-    DebugPrint("[OpOne] All Waypoints cleared.")
+    print("[OpOne] All Waypoints cleared.")
 end)
 
 local function DrawDebugHUD()
