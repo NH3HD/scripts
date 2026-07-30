@@ -491,31 +491,31 @@ local function SerializeConfig(cfgName, cfg)
     table.insert(parts, "config_name=" .. tostring(cfgName))
     for k, v in pairs(cfg) do
         if type(v) ~= "table" then
-            table.insert(parts, tostring(k) .. "=" .. tostring(v))
+            if k == "waypoints_data" and v then
+                table.insert(parts, "waypoints_data=" .. base64_encode(v))
+            else
+                table.insert(parts, tostring(k) .. "=" .. tostring(v))
+            end
         end
     end
-    table.insert(parts, "waypoints_data=" .. (cfg.waypoints_data or ""))
     local rawStr = "[OpOne]" .. table.concat(parts, ";")
     return EncryptData(rawStr)
 end
 
 local function DeserializeConfig(encodedStr)
     if not encodedStr or type(encodedStr) ~= "string" then return nil end
-    
     local decryptedStr = DecryptData(encodedStr)
     if not decryptedStr or string.sub(decryptedStr, 1, 7) ~= "[OpOne]" then return nil end
-    
     local cfg = {}
     local dataStr = string.sub(decryptedStr, 8)
     for k, v in string.gmatch(dataStr, "([^=;]+)=([^=;]+)") do
         if k == "waypoints_data" then
-            cfg[k] = v
+            cfg[k] = base64_decode(v)
         elseif v == "true" then cfg[k] = true
         elseif v == "false" then cfg[k] = false
         elseif tonumber(v) then cfg[k] = tonumber(v)
         else cfg[k] = v end
     end
-    
     if cfg.recoil_x == nil or cfg.recoil_y == nil then return nil end
     return cfg
 end
