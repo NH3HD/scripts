@@ -52,7 +52,7 @@ end)
 local kUiTab = "Macro"
 local kUiMain = "Settings"        
 local kUiMisc = "Miscellaneous"   
-local kUiWay = "OP1_MW"
+local kUiWay = "MacroW"
 
 local FILE_PATH = "op1_recoil_configs.data"
 local LINKS_FILE_PATH = "op1_weapon_links.data"
@@ -100,7 +100,7 @@ end
 
 local function base64_decode(data)
     data = string.gsub(data, '[^'..b64chars..'=]', '')
-    return (data:gsub('.', function(x)
+    return (data:gub('.', function(x)
         if (x == '=') then return '' end
         local r, f = '', (b64chars:find(x)-1)
         for i = 6, 1, -1 do r = r .. (math.floor(f % 2^i / 2^(i-1)) > 0 and '1' or '0') end
@@ -307,7 +307,7 @@ local function LoadConfigData(name)
     
     ui.setValue(kUiTab, kUiMisc, "Tool Check", d.tool_check == true)
     ui.setValue(kUiTab, kUiMisc, "Unloaded Ammo Check", d.ammo_check == true)
-    ui.setValue(kUiTab, kUiWay, "Enable Waypoints", d.wp_enabled == true)
+    ui.setValue(kUiWay, kUiWay, "Enable Waypoints", d.wp_enabled == true)
     
     local eTime = tonumber(d.easing_time) or tonumber(d.ramp_time) or 1000
     ui.setValue(kUiTab, kUiMain, "Easing Time (ms)", eTime)
@@ -738,7 +738,7 @@ ui.newButton(kUiTab, kUiMisc, "Save / Create Config", function()
         easing_time = ui.getValue(kUiTab, kUiMain, "Easing Time (ms)"),
         target_check = ui.getValue(kUiTab, kUiMisc, "Target Check (FOV)"),
         target_fov = ui.getValue(kUiTab, kUiMisc, "Target FOV"),
-        wp_enabled = ui.getValue(kUiTab, kUiWay, "Enable Waypoints")
+        wp_enabled = ui.getValue(kUiWay, kUiWay, "Enable Waypoints")
     }
     SaveToFile()
     DebugPrint("[OpOne] Saved Config: " .. name)
@@ -991,7 +991,7 @@ local function SafeDrawGraph()
         local maxSpeed = 0
         local minX, maxX, minY, maxY = 0, 0, 0, 0
         
-        local wp_enabled = ui.getValue(kUiTab, kUiWay, "Enable Waypoints")
+        local wp_enabled = ui.getValue(kUiWay, kUiWay, "Enable Waypoints")
         
         if wp_enabled and #Waypoints > 0 then
             local last_wp = Waypoints[#Waypoints]
@@ -1376,7 +1376,7 @@ cheat.register("onUpdate", function()
             local easeIdx2 = ui.getValue(kUiTab, kUiMain, "Secondary Easing") or 0
             local easingTime = ui.getValue(kUiTab, kUiMain, "Easing Time (ms)") or 1000
             
-            local wp_enabled = ui.getValue(kUiTab, kUiWay, "Enable Waypoints")
+            local wp_enabled = ui.getValue(kUiWay, kUiWay, "Enable Waypoints")
             
             if wp_enabled and #Waypoints > 0 then
                 local targetX, targetY = GetWaypointTarget(currentShot)
