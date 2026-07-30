@@ -380,22 +380,59 @@ local function LoadConfigData(name)
 end
 
 local function SaveToFile()
-    local json_str = JsonEncode(AllConfigs)
-    local encrypted = EncryptData(json_str)
-    file.write(FILE_PATH, encrypted)
+    local content = ""
+    for name, data in pairs(AllConfigs) do
+        content = content .. "{\n"
+        content = content .. '  config_name: "' .. name .. '"\n'
+        content = content .. '  act_key1: "' .. tostring(data.act_key1) .. '"\n'
+        content = content .. '  act_key2: "' .. tostring(data.act_key2) .. '"\n'
+        content = content .. '  act_logic: "' .. tostring(data.act_logic) .. '"\n'
+        content = content .. '  act_mode: "' .. tostring(data.act_mode) .. '"\n'
+        content = content .. '  recoil_x: "' .. tostring(data.recoil_x) .. '"\n'
+        content = content .. '  recoil_y: "' .. tostring(data.recoil_y) .. '"\n'
+        content = content .. '  delay: "' .. tostring(data.delay) .. '"\n'
+        content = content .. '  smooth: "' .. tostring(data.smooth) .. '"\n'
+        content = content .. '  randomizer: "' .. tostring(data.randomizer) .. '"\n'
+        content = content .. '  weak_mode: "' .. tostring(data.weak_mode) .. '"\n'
+        content = content .. '  easing_type: "' .. tostring(data.easing_type) .. '"\n'
+        content = content .. '  easing_type_2: "' .. tostring(data.easing_type_2) .. '"\n'
+        content = content .. '  easing_time: "' .. tostring(data.easing_time) .. '"\n'
+        content = content .. '  tool_check: "' .. tostring(data.tool_check) .. '"\n'
+        content = content .. '  ammo_check: "' .. tostring(data.ammo_check) .. '"\n'
+        content = content .. '  target_check: "' .. tostring(data.target_check) .. '"\n'
+        content = content .. '  target_fov: "' .. tostring(data.target_fov) .. '"\n'
+        content = content .. '  wp_enabled: "' .. tostring(data.wp_enabled) .. '"\n'
+        content = content .. '  waypoints_data: "' .. tostring(data.waypoints_data or "") .. '"\n'
+        content = content .. "}\n\n"
+    end
+    file.write(FILE_PATH, content)
     UpdateConfigNames()
 end
 
 local function LoadFromFile()
     local content = file.read(FILE_PATH)
     if not content or content == "" then UpdateConfigNames(); return end
-    local decrypted = DecryptData(content)
-    if not decrypted then UpdateConfigNames(); return end
-    local success, data = pcall(JsonDecode, decrypted)
-    if success and type(data) == "table" then
-        AllConfigs = data
-    else
-        AllConfigs = {}
+    AllConfigs = {}
+    local currentData = {}
+    local insideBlock = false
+    for line in string.gmatch(content, "[^\r\n]+") do
+        local clean = string.match(line, "^%s*(.-)%s*$")
+        if clean == "{" then insideBlock = true; currentData = {}
+        elseif clean == "}" then insideBlock = false; if currentData.config_name then AllConfigs[currentData.config_name] = currentData end
+        elseif insideBlock and clean ~= "" then
+            local key, val = string.match(clean, '^(.-):%s*"(.-)"')
+            if key and val then
+                if key == "config_name" then currentData.config_name = val
+                elseif val == "true" then currentData[key] = true
+                elseif val == "false" then currentData[key] = false
+                elseif key == "easing_type" then currentData[key] = val
+                elseif key == "easing_type_2" then currentData[key] = val
+                elseif key == "ramp_time" or key == "easing_time" then 
+                    currentData["easing_time"] = tonumber(val) or 1000 
+                elseif key == "waypoints_data" then currentData[key] = val
+                else currentData[key] = tonumber(val) or 0 end
+            end
+        end
     end
     UpdateConfigNames()
 end
@@ -448,20 +485,37 @@ local function LoadMasterSettings()
     end
 end
 
-local function ExportConfigToClipboard(name)
-    if not AllConfigs[name] then return end
-    local cfg_copy = DeepCopyTable(AllConfigs[name])
-    cfg_copy.config_name = name
-    local json_str = JsonEncode(cfg_copy)
-    local encrypted = EncryptData(json_str)
-    utility.SetClipboard(encrypted)
+local function SerializeConfig(cfgName, cfg)
+    local parts = {}
+    table.insert(parts, "config_name=" .. tostring(cfgName))
+    for k, v in pairs(cfg) do
+        if type(v) ~= "table" then
+            table.insert(parts, tostring(k) .. "=" .. tostring(v))
+        end
+    end
+    table.insert(parts, "waypoints_data=" .. (cfg.waypoints_data or ""))
+    local rawStr = "[OpOne]" .. table.concat(parts, ";")
+    return EncryptData(rawStr)
 end
 
-local function ImportConfigFromClipboard(str)
-    local decrypted = DecryptData(str)
-    if not decrypted then return nil end
-    local success, cfg = pcall(JsonDecode, decrypted)
-    if not success or type(cfg) ~= "table" then return nil end
+local function DeserializeConfig(encodedStr)
+    if not encodedStr or type(encodedStr) ~= "string" then return nil end
+    
+    local decryptedStr = DecryptData(encodedStr)
+    if not decryptedStr or string.sub(decryptedStr, 1, 7) ~= "[OpOne]" then return nil end
+    
+    local cfg = {}
+    local dataStr = string.sub(decryptedStr, 8)
+    for k, v in string.gmatch(dataStr, "([^=;]+)=([^=;]+)") do
+        if k == "waypoints_data" then
+            cfg[k] = v
+        elseif v == "true" then cfg[k] = true
+        elseif v == "false" then cfg[k] = false
+        elseif tonumber(v) then cfg[k] = tonumber(v)
+        else cfg[k] = v end
+    end
+    
+    if cfg.recoil_x == nil or cfg.recoil_y == nil then return nil end
     return cfg
 end
 
@@ -731,7 +785,6 @@ ui.newButton(kUiTab, kUiMisc, "Save / Create Config", function()
         waypoints_data = JsonEncode(Waypoints)
     }
     SaveToFile()
-    UpdateConfigNames()
     DebugPrint("[OpOne] Saved Config: " .. name)
 end)
 
@@ -741,7 +794,6 @@ ui.newButton(kUiTab, kUiMisc, "Delete Config", function()
         AllConfigs[name] = nil
         ui.setValue(kUiTab, kUiMisc, "Config Name", "")
         SaveToFile()
-        UpdateConfigNames()
         DebugPrint("[OpOne] Deleted Config: " .. name)
     end
 end)
@@ -749,7 +801,8 @@ end)
 ui.newButton(kUiTab, kUiMisc, "Export Config to Clipboard", function()
     local name = ui.getValue(kUiTab, kUiMisc, "Config Name")
     if name and AllConfigs[name] then
-        ExportConfigToClipboard(name)
+        local str = SerializeConfig(name, AllConfigs[name])
+        utility.SetClipboard(str)
         DebugPrint("[OpOne] Config '" .. name .. "' copied to clipboard!")
     else
         DebugPrint("[OpOne] Select a valid config to export.")
@@ -758,7 +811,7 @@ end)
 
 ui.newButton(kUiTab, kUiMisc, "Import Config from Clipboard", function()
     local str = utility.GetClipboard()
-    local cfg = ImportConfigFromClipboard(str)
+    local cfg = DeserializeConfig(str)
     
     if cfg then
         local name = cfg.config_name
