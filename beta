@@ -260,6 +260,26 @@ local function DebugPrint(msg)
     end
 end
 
+local function GetRecoilForShot(shot)
+    if #Waypoints == 0 then return 0, 0 end
+    if Waypoints[1].shot > shot then return Waypoints[1].x, Waypoints[1].y end
+    
+    local last_wp = Waypoints[#Waypoints]
+    if shot >= last_wp.shot then return last_wp.x, last_wp.y end
+    
+    for i = 1, #Waypoints - 1 do
+        local wp1 = Waypoints[i]
+        local wp2 = Waypoints[i+1]
+        if shot >= wp1.shot and shot < wp2.shot then
+            local t = (shot - wp1.shot) / (wp2.shot - wp1.shot)
+            local x = wp1.x + (wp2.x - wp1.x) * t
+            local y = wp1.y + (wp2.y - wp1.y) * t
+            return x, y
+        end
+    end
+    return last_wp.x, last_wp.y
+end
+
 local function RebuildVisualCache()
     VisualCache.points = {}
     VisualCache.maxDist = 1
@@ -343,7 +363,16 @@ local function LoadConfigData(name)
     ui.setValue(kUiTab, kUiMisc, "Config Name", name)
     lastConfigDropdownIndex = cfgIdx
     
-    Waypoints = d.waypoints or {}
+    if d.waypoints_data and d.waypoints_data ~= "" then
+        local success, wps = pcall(JsonDecode, d.waypoints_data)
+        if success and type(wps) == "table" then
+            Waypoints = wps
+        else
+            Waypoints = {}
+        end
+    else
+        Waypoints = {}
+    end
     table.sort(Waypoints, function(a, b) return a.shot < b.shot end)
     VisualCache.dirty = true
     
@@ -699,9 +728,10 @@ ui.newButton(kUiTab, kUiMisc, "Save / Create Config", function()
         target_check = ui.getValue(kUiTab, kUiMisc, "Target Check (FOV)"),
         target_fov = ui.getValue(kUiTab, kUiMisc, "Target FOV"),
         wp_enabled = ui.getValue(kUiWay, kUiWay, "Enable Waypoints"),
-        waypoints = DeepCopyTable(Waypoints)
+        waypoints_data = JsonEncode(Waypoints)
     }
     SaveToFile()
+    UpdateConfigNames()
     DebugPrint("[OpOne] Saved Config: " .. name)
 end)
 
@@ -711,6 +741,7 @@ ui.newButton(kUiTab, kUiMisc, "Delete Config", function()
         AllConfigs[name] = nil
         ui.setValue(kUiTab, kUiMisc, "Config Name", "")
         SaveToFile()
+        UpdateConfigNames()
         DebugPrint("[OpOne] Deleted Config: " .. name)
     end
 end)
