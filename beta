@@ -52,7 +52,7 @@ end)
 local kUiTab = "Macro"
 local kUiMain = "Settings"        
 local kUiMisc = "Miscellaneous"   
-local kUiWay = "Waypoints"
+local kUiWay = "OP1_MW"
 
 local FILE_PATH = "op1_recoil_configs.data"
 local LINKS_FILE_PATH = "op1_weapon_links.data"
